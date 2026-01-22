@@ -9,13 +9,12 @@ import java.time.LocalDateTime;
  */
 @Data
 public class WorkInstruction {
-    // 基础信息
-    private String wiRefNo;       // 指令编号
+    private String wiRefNo;       // 指令编号 (Key)
     private String queueName;     // 指令所属的队列
     private String containerId;   // 作业的箱号id
-    private BizTypeEnum moveKind; // 指令类型 移动 搬运
+    private BizTypeEnum moveKind; // 指令类型 (LOAD, DSCH, RECV, DLVR)
 
-    // 流程 (抓 -> 运 -> 放)
+    // 抓 -> 运 -> 放
     private String fetchCheId;    // 抓箱设备
     private LocalDateTime fetchTime;
 
@@ -25,13 +24,24 @@ public class WorkInstruction {
     private String putCheId;      // 放箱设备
     private LocalDateTime putTime;
 
-    // 位置与状态
+    //位置与状态
     private String fromPos;       // 起点
     private String toPos;         // 终点/当前流转位置
-    private String wiStatus;      // 指令作业状态
+
+    //  将 status 统一映射到 wiStatus
+    private String wiStatus;      // 指令作业状态 (如: ACTIVE, COMPLETE)
     private String jobStep;       // 指令具体状态
 
-    // 时间
+    //  时间
     private LocalDateTime dispatchTime; // 下达时间
     private LocalDateTime doneTime;     // 结束时间
+
+    //  详细位置
+    private String blockCode;     // 箱区代码
+    private String bay;           // 贝位
+    private String row;           // 排
+    private String tier;          // 层
+
+    //  调度
+    private String dispatchCheId; // 最终派发的设备ID
 }
