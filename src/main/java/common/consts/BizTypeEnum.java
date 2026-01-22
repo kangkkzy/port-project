@@ -1,7 +1,12 @@
 package common.consts;
-/**
+/*
  * 业务类型枚举
  */
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
+@Getter
+@AllArgsConstructor
 public enum BizTypeEnum {
     DSCH("DSCH", "卸船 (Vessel -> Yard)"),
     LOAD("LOAD", "装船 (Yard -> Vessel)"),
@@ -11,17 +16,4 @@ public enum BizTypeEnum {
 
     private final String code;
     private final String desc;
-
-    BizTypeEnum(String code, String desc) {
-        this.code = code;
-        this.desc = desc;
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public String getDesc() {
-        return desc;
-    }
 }

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- *全局字段
+ * 全局字段
  */
 public class GlobalContext {
 
@@ -36,9 +36,6 @@ public class GlobalContext {
 
     private GlobalContext() {}
 
-    /**
-     * 获取单例实例
-     */
     public static GlobalContext getInstance() {
         if (instance == null) {
             synchronized (GlobalContext.class) {
@@ -50,17 +47,10 @@ public class GlobalContext {
         return instance;
     }
 
-    // --- Getters ---
-
     public Map<String, Truck> getTruckMap() { return truckMap; }
-
     public Map<String, QcDevice> getQcMap() { return qcMap; }
-
     public Map<String, AscDevice> getAscMap() { return ascMap; }
-
     public Map<String, WorkInstruction> getWorkInstructionMap() { return workInstructionMap; }
-
     public Map<String, Container> getContainerMap() { return containerMap; }
-
     public Map<String, YardBlock> getYardBlockMap() { return yardBlockMap; }
 }

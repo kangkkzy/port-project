@@ -1,8 +1,13 @@
 package common.consts;
 
-/**
+/*
  * 设备类型枚举
  */
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
+@Getter
+@AllArgsConstructor
 public enum DeviceTypeEnum {
     INTERNAL_TRUCK(1, "内部集卡"),
     EXTERNAL_TRUCK(2, "外部集卡"),
@@ -13,17 +18,12 @@ public enum DeviceTypeEnum {
 
     private final int code;
     private final String desc;
-
-    DeviceTypeEnum(int code, String desc) {
-        this.code = code;
-        this.desc = desc;
-    }
-
-    public int getCode() {
-        return code;
-    }
-
-    public String getDesc() {
-        return desc;
+    public static DeviceTypeEnum getByCode(int code) {
+        for (DeviceTypeEnum value : values()) {
+            if (value.getCode() == code) {
+                return value;
+            }
+        }
+        return null;
     }
 }
