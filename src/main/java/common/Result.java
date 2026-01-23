@@ -21,19 +21,28 @@ public class Result {
         this.msg = msg;
         this.data = data;
     }
-// 成功
+
+    //  无参的成功返回方法
+    public static Result success() {
+        return new Result(200, "操作成功", null);
+    }
+
+    // 成功 (带数据)
     public static Result success(Object data) {
         return new Result(200, "操作成功", data);
     }
-// 失败
+
+    // 成功 (带消息和数据)
     public static Result success(String msg, Object data) {
         return new Result(200, msg, data);
     }
 
+    // 失败 (带消息)
     public static Result error(String msg) {
         return new Result(500, msg, null);
     }
 
+    // 失败 (带自定义状态码和消息)
     public static Result error(Integer code, String msg) {
         return new Result(code, msg, null);
     }

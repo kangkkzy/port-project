@@ -2,6 +2,7 @@ package controller;
 
 import common.Result;
 import model.dto.request.AssignTaskReq;
+import model.dto.request.CraneOperationReq; // 【修复】引入大机作业请求类
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,14 +13,14 @@ import service.algorithm.ExternalAlgorithmApi;
 @RequestMapping("/sim/command")
 public class SimCommandController {
 
-    //  依赖注入接口
+    // 依赖注入接口
     @Autowired
     private ExternalAlgorithmApi algorithmApi;
 
     // 控制移动
     @PostMapping("/move")
     public Result move(@RequestBody MoveCommandReq req) {
-        return algorithmApi.moveTruck(req);
+        return algorithmApi.moveDevice(req);
     }
 
     // 分配任务
@@ -32,6 +33,12 @@ public class SimCommandController {
     @PostMapping("/fence")
     public Result controlFence(@RequestBody FenceControlReq req) {
         return algorithmApi.toggleFence(req);
+    }
+
+    //  控制桥吊/龙门吊作业 (抓箱/放箱)
+    @PostMapping("/crane/operate")
+    public Result operateCrane(@RequestBody CraneOperationReq req) {
+        return algorithmApi.operateCrane(req);
     }
 
     // 推进时间
