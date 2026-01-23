@@ -28,27 +28,20 @@ public class SimulationEngine {
     }
 
     /**
-     * 外部算法驱动接口
+     * 外部算法驱动接口 推演仿真系统
      */
     public void runUntil(long targetSimTime) {
         while (!eventQueue.isEmpty()) {
             SimEvent nextEvent = eventQueue.peek();
 
-            // 如果队列最前面的事件发生时间 已经超过要推演的时间 暂停推演
             if (nextEvent.getTriggerTime() > targetSimTime) {
                 break;
             }
 
-            // 取出事件
             eventQueue.poll();
-
-            // 时钟瞬间跳跃到事件发生的时间
             context.setSimTime(nextEvent.getTriggerTime());
-
-            // 消费事件
             handleEvent(nextEvent);
         }
-        // 推演结束 将当前仿真时间同步为目标时间
         context.setSimTime(targetSimTime);
     }
 
@@ -58,18 +51,34 @@ public class SimulationEngine {
     private void handleEvent(SimEvent event) {
         long now = context.getSimTime();
 
+        //  获取设备  集卡、岸桥、龙门吊
+        BaseDevice device = context.getDevice(event.getTargetId());
+
         switch (event.getType()) {
             case MOVE_START:
-                BaseDevice device = context.getTruckMap().get(event.getTargetId());
                 if (device != null) device.onMoveStart(now, this);
                 break;
 
             case ARRIVAL:
-                BaseDevice arrivingDevice = context.getTruckMap().get(event.getTargetId());
-                if (arrivingDevice != null) arrivingDevice.onArrival((Point) event.getData(), now, this);
+                if (device != null) device.onArrival((Point) event.getData(), now, this);
                 break;
 
-            // 执行外部算法下发的任意栅栏状态
+            //  完成抓箱操作
+            case FETCH_DONE:
+                if (device != null) {
+                    log.info("时间:{} 设备:{} 完成抓箱", now, device.getId());
+                    //  释放设备
+                }
+                break;
+
+            //  完成放箱的操作
+            case PUT_DONE:
+                if (device != null) {
+                    log.info("时间:{} 设备:{} 完成放箱", now, device.getId());
+                    //  触发 作业指令完成 事件
+                }
+                break;
+
             case FENCE_CONTROL:
                 Fence fence = context.getFenceMap().get(event.getTargetId());
                 if (fence != null) {
@@ -78,7 +87,6 @@ public class SimulationEngine {
                 }
                 break;
 
-            // 预留扩展接口
             default:
                 break;
         }

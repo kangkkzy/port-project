@@ -7,10 +7,11 @@ import common.consts.FenceStateEnum;
 import engine.SimulationEngine;
 import model.bo.GlobalContext;
 import model.dto.request.AssignTaskReq;
+import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
+import model.entity.BaseDevice;
 import model.entity.Fence;
-import model.entity.Truck;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import service.algorithm.ExternalAlgorithmApi;
@@ -29,25 +30,23 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
     private SimulationEngine engine;
 
     @Override
-    public Result moveTruck(MoveCommandReq req) {
-        Truck truck = context.getTruckMap().get(req.getTruckId());
-        if (truck == null) return Result.error(ErrorCodes.TRUCK_NOT_FOUND);
+    public Result moveDevice(MoveCommandReq req) {
+        // 【核心变更】不再只获取集卡，而是获取任何种类的设备
+        BaseDevice device = context.getDevice(req.getTruckId());
+        if (device == null) return Result.error(ErrorCodes.DEVICE_NOT_FOUND);
 
-        // 将请求的 List<Point> 转换为实体需要的 Queue<Point>
-        truck.setWaypoints(new LinkedList<>(req.getPoints()));
-
-        // 将外部移动指令转化为仿真事件 注入当前时间
-        engine.scheduleEvent(context.getSimTime(), EventTypeEnum.MOVE_START, truck.getId(), null);
+        device.setWaypoints(new LinkedList<>(req.getPoints()));
+        engine.scheduleEvent(context.getSimTime(), EventTypeEnum.MOVE_START, device.getId(), null);
 
         return Result.success();
     }
 
     @Override
     public Result assignTask(AssignTaskReq req) {
-        Truck truck = context.getTruckMap().get(req.getTruckId());
-        if (truck == null) return Result.error(ErrorCodes.TRUCK_NOT_FOUND);
+        BaseDevice device = context.getDevice(req.getTruckId());
+        if (device == null) return Result.error(ErrorCodes.DEVICE_NOT_FOUND);
 
-        truck.setCurrWiRefNo(req.getWiRefNo());
+        device.setCurrWiRefNo(req.getWiRefNo());
         return Result.success();
     }
 
@@ -59,15 +58,30 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         FenceStateEnum targetStatus = FenceStateEnum.getByCode(req.getStatus());
         if (targetStatus == null) return Result.error(ErrorCodes.INVALID_FENCE_STATUS);
 
-        // 接受外部算法的状态设定 注入仿真事件
         engine.scheduleEvent(context.getSimTime(), EventTypeEnum.FENCE_CONTROL, req.getFenceId(), targetStatus);
+
+        return Result.success();
+    }
+
+    /**
+     *  处理桥吊/龙门吊的作业耗时：将作业行为注册到未来的时间点完成
+     */
+    @Override
+    public Result operateCrane(CraneOperationReq req) {
+        BaseDevice crane = context.getDevice(req.getCraneId());
+        if (crane == null) return Result.error(ErrorCodes.DEVICE_NOT_FOUND);
+
+        // 计算未来的动作完成时间 = 当前时间 + 该作业预计耗时
+        long finishTime = context.getSimTime() + req.getDurationMS();
+
+        // 注册作业完成事件
+        engine.scheduleEvent(finishTime, req.getAction(), crane.getId(), null);
 
         return Result.success();
     }
 
     @Override
     public void stepTime(long stepMS) {
-        // 根据外部指令 计算下一个目标推演时间
         long targetTime = context.getSimTime() + stepMS;
         engine.runUntil(targetTime);
     }

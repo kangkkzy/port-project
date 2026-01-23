@@ -2,32 +2,27 @@ package service.algorithm;
 
 import common.Result;
 import model.dto.request.AssignTaskReq;
+import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
 
 /**
  * 外部算法接入 API 接口
- * 定义了外部算法与仿真引擎交互的标准契约
  */
 public interface ExternalAlgorithmApi {
 
-    /**
-     *  运动控制：下发车辆移动路径
-     */
-    Result moveTruck(MoveCommandReq req);
+    /**  运动控制 下发 设备的移动路径 */
+    Result moveDevice(MoveCommandReq req);
 
-    /**
-     *  任务控制：为车辆指派业务任务
-     */
+    /**  任务控制 设备指派业务任务 */
     Result assignTask(AssignTaskReq req);
 
-    /**
-     *  环境控制：控制交通栅栏状态 (锁死/通行)
-     */
+    /**  环境控制 控制交通栅栏状态 (锁死/通行) */
     Result toggleFence(FenceControlReq req);
 
-    /**
-     *  时间控制：驱动仿真时钟向后推演指定的毫秒数
-     */
+    /**  作业控制：控制桥吊/龙门吊进行抓箱/放箱作业 (支持设置作业耗时) */
+    Result operateCrane(CraneOperationReq req);
+
+    /**  时间控制 驱动仿真时钟向后推演指定的时间 */
     void stepTime(long stepMS);
 }

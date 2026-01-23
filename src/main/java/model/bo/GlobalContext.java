@@ -41,6 +41,16 @@ public class GlobalContext {
     }
 
     /**
+     *  统一设备查找：依次在 集卡、岸桥、龙门吊 池中查找设备
+     */
+    public BaseDevice getDevice(String deviceId) {
+        if (truckMap.containsKey(deviceId)) return truckMap.get(deviceId);
+        if (qcMap.containsKey(deviceId)) return qcMap.get(deviceId);
+        if (ascMap.containsKey(deviceId)) return ascMap.get(deviceId);
+        return null;
+    }
+
+    /**
      * 清空所有数据
      */
     public void clearAll() {
@@ -54,7 +64,7 @@ public class GlobalContext {
         simTime = 0L;
     }
 
-    //  时间的 Getters & Setters
+    // 时间的 Getters & Setters
     public long getSimTime() { return simTime; }
     public void setSimTime(long simTime) { this.simTime = simTime; }
 
