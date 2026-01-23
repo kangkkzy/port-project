@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 全局上下文 (单例)
+ * 全局上下文
  */
 public class GlobalContext {
 
@@ -37,7 +37,7 @@ public class GlobalContext {
     }
 
     /**
-     * [新增] 清空所有数据 (用于全量同步前)
+     * 清空所有数据 (用于全量同步前)
      */
     public void clearAll() {
         truckMap.clear();
