@@ -6,37 +6,38 @@ import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-import service.CommandExecutionService;
+import service.algorithm.ExternalAlgorithmApi;
 
 @RestController
 @RequestMapping("/sim/command")
 public class SimCommandController {
 
+    //  依赖注入接口
     @Autowired
-    private CommandExecutionService commandService;
+    private ExternalAlgorithmApi algorithmApi;
 
-    // 控制移动 外部算法下达车辆路径规划
+    // 控制移动
     @PostMapping("/move")
     public Result move(@RequestBody MoveCommandReq req) {
-        return commandService.moveTruck(req);
+        return algorithmApi.moveTruck(req);
     }
 
-    // 分配任务 外部算法进行任务指派
+    // 分配任务
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
-        return commandService.assignTask(req);
+        return algorithmApi.assignTask(req);
     }
 
-    // 控制栅栏 外部算法直接设定栅栏状态
+    // 控制栅栏
     @PostMapping("/fence")
     public Result controlFence(@RequestBody FenceControlReq req) {
-        return commandService.toggleFence(req);
+        return algorithmApi.toggleFence(req);
     }
 
-    // 推进时间 外部算法驱动仿真世界的时间流动
+    // 推进时间
     @PostMapping("/step")
     public Result stepTime(@RequestParam long stepMS) {
-        commandService.stepTime(stepMS);
+        algorithmApi.stepTime(stepMS);
         return Result.success();
     }
 }

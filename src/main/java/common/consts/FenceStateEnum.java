@@ -14,4 +14,14 @@ public enum FenceStateEnum {
 
     private final String code;
     private final String desc;
+
+    //  根据 code 获取枚举对象
+    public static FenceStateEnum getByCode(String code) {
+        for (FenceStateEnum value : values()) {
+            if (value.getCode().equals(code)) {
+                return value;
+            }
+        }
+        return null;
+    }
 }

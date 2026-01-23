@@ -11,16 +11,19 @@ public class GlobalContext {
 
     private static volatile GlobalContext instance;
 
-    //  物理实体
+    // 仿真世界当前的绝对时间戳
+    private long simTime = 0L;
+
+    // 物理实体
     private final Map<String, Truck> truckMap = new ConcurrentHashMap<>();
     private final Map<String, QcDevice> qcMap = new ConcurrentHashMap<>();
     private final Map<String, AscDevice> ascMap = new ConcurrentHashMap<>();
 
-    //  环境约束与基础设施
+    // 环境约束与基础设施
     private final Map<String, Fence> fenceMap = new ConcurrentHashMap<>(); // 栅栏池
     private final Map<String, YardBlock> yardBlockMap = new ConcurrentHashMap<>();
 
-    //  业务数据
+    // 业务数据
     private final Map<String, WorkInstruction> workInstructionMap = new ConcurrentHashMap<>();
     private final Map<String, Container> containerMap = new ConcurrentHashMap<>();
 
@@ -44,17 +47,22 @@ public class GlobalContext {
         truckMap.clear();
         qcMap.clear();
         ascMap.clear();
-        fenceMap.clear(); // 清空栅栏
+        fenceMap.clear();
         yardBlockMap.clear();
         workInstructionMap.clear();
         containerMap.clear();
+        simTime = 0L;
     }
 
-    // Getters
+    //  时间的 Getters & Setters
+    public long getSimTime() { return simTime; }
+    public void setSimTime(long simTime) { this.simTime = simTime; }
+
+    // 其他 Getters
     public Map<String, Truck> getTruckMap() { return truckMap; }
     public Map<String, QcDevice> getQcMap() { return qcMap; }
     public Map<String, AscDevice> getAscMap() { return ascMap; }
-    public Map<String, Fence> getFenceMap() { return fenceMap; } // 【新增】获取栅栏池
+    public Map<String, Fence> getFenceMap() { return fenceMap; }
     public Map<String, YardBlock> getYardBlockMap() { return yardBlockMap; }
     public Map<String, WorkInstruction> getWorkInstructionMap() { return workInstructionMap; }
     public Map<String, Container> getContainerMap() { return containerMap; }

@@ -9,6 +9,7 @@ public enum EventTypeEnum {
     ARRIVAL,       // 瞬间到达某个路径点
 
     // 栅栏控制事件
+    FENCE_CONTROL, //  外部算法直接控制栅栏状态
     FENCE_OPEN,    // 栅栏开启 (状态变为 02)
     FENCE_CLOSE,   // 栅栏锁死 (状态变为 01)
 

@@ -1,6 +1,7 @@
-package service;
+package service.algorithm.impl;
 
 import common.Result;
+import common.consts.ErrorCodes;
 import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
 import engine.SimulationEngine;
@@ -12,22 +13,28 @@ import model.entity.Fence;
 import model.entity.Truck;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import service.algorithm.ExternalAlgorithmApi;
 
+import java.util.LinkedList;
+
+/**
+ * 外部算法 API 的具体实现类
+ */
 @Service
-public class CommandExecutionService {
+public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
 
     private final GlobalContext context = GlobalContext.getInstance();
 
     @Autowired
     private SimulationEngine engine;
 
-    // 外部算法下达路径
+    @Override
     public Result moveTruck(MoveCommandReq req) {
         Truck truck = context.getTruckMap().get(req.getTruckId());
-        if (truck == null) return Result.error("车辆不存在");
+        if (truck == null) return Result.error(ErrorCodes.TRUCK_NOT_FOUND);
 
-        // 纯状态绑定
-        truck.setWaypoints(req.getPoints());
+        // 将请求的 List<Point> 转换为实体需要的 Queue<Point>
+        truck.setWaypoints(new LinkedList<>(req.getPoints()));
 
         // 将外部移动指令转化为仿真事件 注入当前时间
         engine.scheduleEvent(context.getSimTime(), EventTypeEnum.MOVE_START, truck.getId(), null);
@@ -35,32 +42,30 @@ public class CommandExecutionService {
         return Result.success();
     }
 
-    // 外部算法绑定任务
+    @Override
     public Result assignTask(AssignTaskReq req) {
         Truck truck = context.getTruckMap().get(req.getTruckId());
-        if (truck == null) return Result.error("车辆不存在");
+        if (truck == null) return Result.error(ErrorCodes.TRUCK_NOT_FOUND);
 
-        // 纯状态绑定
-        truck.setCurrentTask(req.getTaskId());
+        truck.setCurrWiRefNo(req.getWiRefNo());
         return Result.success();
     }
 
-    // 外部算法控制栅栏
+    @Override
     public Result toggleFence(FenceControlReq req) {
         Fence fence = context.getFenceMap().get(req.getFenceId());
-        if (fence == null) return Result.error("栅栏不存在");
+        if (fence == null) return Result.error(ErrorCodes.FENCE_NOT_FOUND);
 
         FenceStateEnum targetStatus = FenceStateEnum.getByCode(req.getStatus());
-        if (targetStatus == null) return Result.error("非法的栅栏状态码");
+        if (targetStatus == null) return Result.error(ErrorCodes.INVALID_FENCE_STATUS);
 
-        //   接受外部算法的状态设定
-        // 直接将外部要求的状态作为 Data 注入仿真事件
+        // 接受外部算法的状态设定 注入仿真事件
         engine.scheduleEvent(context.getSimTime(), EventTypeEnum.FENCE_CONTROL, req.getFenceId(), targetStatus);
 
         return Result.success();
     }
 
-    // 外部算法推进时间
+    @Override
     public void stepTime(long stepMS) {
         // 根据外部指令 计算下一个目标推演时间
         long targetTime = context.getSimTime() + stepMS;

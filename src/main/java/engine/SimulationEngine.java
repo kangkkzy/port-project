@@ -17,7 +17,7 @@ public class SimulationEngine {
 
     private final GlobalContext context = GlobalContext.getInstance();
 
-    // 【DES核心】优先队列，按发生时间自动排序
+    //  优先队列 按发生时间自动排序
     private final PriorityQueue<SimEvent> eventQueue = new PriorityQueue<>();
 
     /**
@@ -28,7 +28,7 @@ public class SimulationEngine {
     }
 
     /**
-     * 外部算法驱动接口 推演仿真系统直到指定的 targetSimTime
+     * 外部算法驱动接口
      */
     public void runUntil(long targetSimTime) {
         while (!eventQueue.isEmpty()) {
@@ -53,7 +53,7 @@ public class SimulationEngine {
     }
 
     /**
-     * 事件消费中心：严格执行事件
+     * 事件消费中心
      */
     private void handleEvent(SimEvent event) {
         long now = context.getSimTime();
@@ -69,10 +69,13 @@ public class SimulationEngine {
                 if (arrivingDevice != null) arrivingDevice.onArrival((Point) event.getData(), now, this);
                 break;
 
-            //  执行外部算法下发的任意栅栏状态
+            // 执行外部算法下发的任意栅栏状态
             case FENCE_CONTROL:
                 Fence fence = context.getFenceMap().get(event.getTargetId());
-                if (fence != null) fence.setStatus((FenceStateEnum) event.getData());
+                if (fence != null) {
+                    FenceStateEnum targetStatus = (FenceStateEnum) event.getData();
+                    fence.setStatus(targetStatus.getCode());
+                }
                 break;
 
             // 预留扩展接口
