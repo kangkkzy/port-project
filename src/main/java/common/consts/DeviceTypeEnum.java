@@ -5,6 +5,7 @@ import lombok.Getter;
 
 /**
  * 设备类型枚举
+ * 对应港口内的核心物理实体类型。
  */
 @Getter
 @AllArgsConstructor
@@ -19,6 +20,10 @@ public enum DeviceTypeEnum {
     private final int code;
     private final String desc;
 
+    /**
+     * 根据 code 获取枚举对象
+     */
+    @SuppressWarnings("unused")
     public static DeviceTypeEnum getByCode(int code) {
         for (DeviceTypeEnum value : values()) {
             if (value.getCode() == code) {

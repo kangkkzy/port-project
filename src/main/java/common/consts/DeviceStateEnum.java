@@ -5,6 +5,7 @@ import lombok.Getter;
 
 /**
  * 设备状态枚举
+ * 对应《字段设计 状态设计.pdf》中对实体状态的定义
  */
 @Getter
 @AllArgsConstructor
@@ -29,9 +30,10 @@ public enum DeviceStateEnum {
 
     /**
      * 根据 code 获取枚举对象
-     * @param code 状态码
+     * * @param code 状态码
      * @return 对应的枚举对象 若未找到返回 null
      */
+    @SuppressWarnings("unused")
     public static DeviceStateEnum getByCode(String code) {
         for (DeviceStateEnum value : values()) {
             if (value.getCode().equals(code)) {

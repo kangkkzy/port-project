@@ -12,14 +12,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import service.algorithm.ExternalAlgorithmApi;
 
+/**
+ * 仿真系统命令控制器
+ */
 @RestController
 @RequestMapping("/sim/command")
 public class SimCommandController {
 
+    private final ExternalAlgorithmApi algorithmApi;
     @Autowired
-    private ExternalAlgorithmApi algorithmApi;
+    public SimCommandController(ExternalAlgorithmApi algorithmApi) {
+        this.algorithmApi = algorithmApi;
+    }
 
-    // 移动控制
+    //  移动控制
 
     @PostMapping("/truck/move")
     public Result moveTruck(@RequestBody MoveCommandReq req) {
@@ -31,11 +37,10 @@ public class SimCommandController {
         return algorithmApi.moveCrane(req);
     }
 
-    //  业务与环境控制
+    //   业务与环境控制
 
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
-        // 使用新版的 AssignTaskResp 闭环返回
         AssignTaskResp resp = algorithmApi.assignTask(req);
         return Result.success(resp);
     }
@@ -55,7 +60,7 @@ public class SimCommandController {
         return algorithmApi.chargeTruck(req);
     }
 
-    //  仿真时钟推演
+    //  仿真时钟
 
     @PostMapping("/step")
     public Result stepTime(@RequestParam long stepMS) {

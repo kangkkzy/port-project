@@ -1,8 +1,9 @@
 package common.consts;
 
 /**
- * 全局错误信息与错误码常量池
+ * 全局错误信息与错误码常量
  */
+@SuppressWarnings("unused")
 public class ErrorCodes {
     // 基础错误
     public static final String SYSTEM_ERROR = "系统内部错误";

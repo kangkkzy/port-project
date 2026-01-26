@@ -28,7 +28,7 @@ public class SimulationEngine {
     private static final int MAX_EVENTS_PER_TIMESTAMP = 10000;
 
     /**
-     * 向未来注册（调度）一个事件。
+     * 向未来注册（调度）一个事件
      * @param parentEventId 触发该事件的父事件ID（用于事件溯源和现场复盘）
      * @param triggerTime   事件发生的绝对时间戳
      * @param type          事件类型 (如：到达、抓箱完成、开始移动)
@@ -42,9 +42,9 @@ public class SimulationEngine {
     }
 
     /**
-     * 取消特定的未来事件。
-     * 需要打断正在进行的充电或排队事件。
+     * 取消充电或排队未来事件的
      */
+    @SuppressWarnings("unused")
     public void cancelEvent(String eventId) {
         for (SimEvent event : eventQueue) {
             if (event.getEventId().equals(eventId)) {
@@ -68,7 +68,7 @@ public class SimulationEngine {
             SimEvent nextEvent = eventQueue.peek();
 
             // 如果下一个事件发生的时间超过了当前推演的目标时间 则暂停处理 跳出循环
-            // 仿真时钟停留在 targetSimTime。
+            // 仿真时钟停留在 targetSimTime
             if (nextEvent.getTriggerTime() > targetSimTime) {
                 break;
             }
@@ -76,7 +76,7 @@ public class SimulationEngine {
             // 从队列中取出该事件
             eventQueue.poll();
 
-            //  取消检查：跳过已作废的事件
+            //  取消检查 跳过已作废的事件
             if (nextEvent.isCancelled()) {
                 log.debug("跳过已取消的事件: {}", nextEvent.getEventId());
                 continue;
@@ -87,11 +87,11 @@ public class SimulationEngine {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > MAX_EVENTS_PER_TIMESTAMP) {
                     log.error("检测到时间戳 {} 发生死循环，强制终止当前时间步的推演", lastProcessedTime);
-                    break; // 强制熔断，防止内存溢出或CPU飙升
+                    break; // 强制熔断
                 }
             } else {
                 lastProcessedTime = nextEvent.getTriggerTime();
-                sameTimeEventCount = 0; // 时间推进，计数器归零
+                sameTimeEventCount = 0; // 时间推进 计数器归零
             }
 
             //   更新全局仿真时钟到当前事件发生的时间点
@@ -134,10 +134,7 @@ public class SimulationEngine {
                     Point reachedPoint = (Point) event.getData();
                     // 处理到达逻辑（更新坐标 扣减电量
                     device.onArrival(reachedPoint, now, this, event.getEventId());
-
-                    // 如果集卡到达了终点 且目标是充电桩 则自动触发开始充电事件
-                    if (device instanceof Truck && device.getWaypoints().isEmpty()) {
-                        Truck truck = (Truck) device;
+                    if (device instanceof Truck truck && device.getWaypoints().isEmpty()) {
                         if (truck.getTargetStationId() != null) {
                             SimEvent chargeEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.CHARGING_START, null);
                             chargeEvent.addSubject("TRUCK", truck.getId());
@@ -150,8 +147,7 @@ public class SimulationEngine {
             //  充电流转逻辑
 
             case CHARGING_START:
-                if (device instanceof Truck) {
-                    Truck truck = (Truck) device;
+                if (device instanceof Truck truck) {
                     device.setState(DeviceStateEnum.CHARGING);
 
                     String stationId = event.getPrimarySubject("STATION");
@@ -172,8 +168,7 @@ public class SimulationEngine {
                 break;
 
             case CHARGE_FULL:
-                if (device instanceof Truck) {
-                    Truck truck = (Truck) device;
+                if (device instanceof Truck truck) {
                     // 恢复满电状态
                     truck.setPowerLevel(Truck.MAX_POWER_LEVEL);
                     truck.setNeedCharge(false);
