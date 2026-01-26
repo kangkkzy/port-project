@@ -9,18 +9,20 @@ import lombok.Getter;
 @Getter
 @AllArgsConstructor
 public enum DeviceStateEnum {
-    // 通用状态
+    // 基础状态
+    CHARGING("01", "充电 (仅集卡)"),
     OFFLINE("02", "退出/离线"),
     IDLE("03", "空闲"),
     WORKING("04", "工作"),
     FAULT("05", "故障"),
 
-    // 集卡特有
-    CHARGING("01", "充电"),
-
-    // 工作子状态 (用于细分 WORKING)
+    // 工作子状态
     MOVING("041", "移动"),
-    WAITING("042", "等待");
+    WAITING("042", "等待"),
+
+    // 龙门吊/桥吊特有子状态
+    MOVE_HORIZONTAL("0421", "横向移动 (龙门吊/桥吊)"),
+    MOVE_VERTICAL("0422", "垂直移动 (龙门吊/桥吊)");
 
     private final String code;
     private final String desc;

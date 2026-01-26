@@ -45,12 +45,11 @@ public abstract class BaseDevice {
     private Queue<Point> waypoints = new LinkedList<>();
 
     /**
-     *  常用构造函数：创建设备时 自动根据其类型赋予默认速度
+     *  创建设备时 自动根据其类型赋予默认速度
      */
     public BaseDevice(String id, DeviceTypeEnum type) {
         this.id = id;
         this.type = type;
-        // 直接从枚举元数据中获取该类设备的速度
         this.speed = type.getDefaultSpeed();
     }
 
@@ -75,7 +74,7 @@ public abstract class BaseDevice {
         //  栅栏限速检测：获取当前路段的限速
         double currentSpeed = applyFenceSpeedLimit(this.speed, nextTarget);
 
-        //   计算物理到达时间
+        //  计算物理到达时间
         this.state = DeviceStateEnum.MOVING;
         Point currentPos = new Point(this.posX, this.posY);
         long travelTimeMS = GisUtil.calculateTravelTimeMS(currentPos, nextTarget, currentSpeed);
@@ -85,9 +84,23 @@ public abstract class BaseDevice {
     }
 
     public void onArrival(Point reachedPoint, long now, SimulationEngine engine) {
+        // 计算本次移动距离
+        Point currentPos = new Point(this.posX, this.posY);
+        double distance = GisUtil.getDistance(currentPos, reachedPoint);
+
         this.posX = reachedPoint.getX();
         this.posY = reachedPoint.getY();
         waypoints.poll();
+
+        //  电量消耗计算 (限电集卡)
+        // 外部算法会通过 getState/getPowerLevel 轮询观察该值 并在适合的时机下达 chargeTruck 指令
+        if (this instanceof Truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
+            Truck truck = (Truck) this;
+            double consume = distance * truck.getConsumeRate();
+            double newPower = Math.max(0.0, truck.getPowerLevel() - consume);
+            truck.setPowerLevel(newPower);
+        }
+
         onMoveStart(now, engine);
     }
 

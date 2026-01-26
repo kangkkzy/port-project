@@ -2,7 +2,9 @@ package controller;
 
 import common.Result;
 import model.dto.request.AssignTaskReq;
-import model.dto.request.CraneOperationReq; // 【修复】引入大机作业请求类
+import model.dto.request.ChargeCommandReq;
+import model.dto.request.CraneMoveReq;
+import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,35 +15,45 @@ import service.algorithm.ExternalAlgorithmApi;
 @RequestMapping("/sim/command")
 public class SimCommandController {
 
-    // 依赖注入接口
     @Autowired
     private ExternalAlgorithmApi algorithmApi;
 
-    // 控制移动
-    @PostMapping("/move")
-    public Result move(@RequestBody MoveCommandReq req) {
+    // 移动控制
+
+    @PostMapping("/truck/move")
+    public Result moveTruck(@RequestBody MoveCommandReq req) {
         return algorithmApi.moveDevice(req);
     }
 
-    // 分配任务
+    @PostMapping("/crane/move")
+    public Result moveCrane(@RequestBody CraneMoveReq req) {
+        return algorithmApi.moveCrane(req);
+    }
+
+    //  业务与环境控制
+
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
         return algorithmApi.assignTask(req);
     }
 
-    // 控制栅栏
-    @PostMapping("/fence")
-    public Result controlFence(@RequestBody FenceControlReq req) {
-        return algorithmApi.toggleFence(req);
-    }
-
-    //  控制桥吊/龙门吊作业 (抓箱/放箱)
     @PostMapping("/crane/operate")
     public Result operateCrane(@RequestBody CraneOperationReq req) {
         return algorithmApi.operateCrane(req);
     }
 
-    // 推进时间
+    @PostMapping("/fence")
+    public Result controlFence(@RequestBody FenceControlReq req) {
+        return algorithmApi.toggleFence(req);
+    }
+
+    @PostMapping("/truck/charge")
+    public Result chargeTruck(@RequestBody ChargeCommandReq req) {
+        return algorithmApi.chargeTruck(req);
+    }
+
+    //  仿真时钟推演
+
     @PostMapping("/step")
     public Result stepTime(@RequestParam long stepMS) {
         algorithmApi.stepTime(stepMS);
