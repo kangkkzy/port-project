@@ -9,6 +9,10 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class Truck extends BaseDevice {
+
+    // 常量 最大电量百分比
+    public static final double MAX_POWER_LEVEL = 100.0;
+
     private Double powerLevel;      // 剩余电量 (百分比)
     private Double consumeRate;     // 耗电率
 

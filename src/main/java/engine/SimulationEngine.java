@@ -79,14 +79,25 @@ public class SimulationEngine {
                 }
                 break;
 
-            // 充电事件 (由外部API触发移动抵达后开始
+            // 充电事件
 
             case CHARGING_START:
-                log.info("时间:{} 集卡:{} 到达充电桩，开始充电", now, targetId);
                 if (device instanceof Truck) {
+                    Truck truck = (Truck) device;
                     device.setState(DeviceStateEnum.CHARGING);
-                    // 充电耗时 (常量: 1小时 = 3600000ms)
-                    long chargeDurationMS = 3600000L;
+
+                    // 获取目标充电桩
+                    ChargingStation station = context.getChargingStationMap().get(truck.getTargetStationId());
+
+                    // 计算充电耗时 = (满电 - 当前电量) / 充电桩速率
+                    double powerNeeded = Truck.MAX_POWER_LEVEL - truck.getPowerLevel();
+                    double rate = (station != null && station.getChargeRate() != null) ? station.getChargeRate() : 0.00001; // 防空指针的默认极低速率
+                    long chargeDurationMS = (long) (powerNeeded / rate);
+
+                    log.info("时间:{} 集卡:{} 到达充电桩[{}]，开始充电。当前电量:{}, 预计耗时:{}ms",
+                            now, targetId, station.getStationCode(), truck.getPowerLevel(), chargeDurationMS);
+
+                    // 注册充满电事件
                     scheduleEvent(now + chargeDurationMS, EventTypeEnum.CHARGE_FULL, targetId, null);
                 }
                 break;
@@ -94,8 +105,8 @@ public class SimulationEngine {
             case CHARGE_FULL:
                 if (device instanceof Truck) {
                     Truck truck = (Truck) device;
-                    // 充满电量
-                    truck.setPowerLevel(100.0);
+                    // 满电量
+                    truck.setPowerLevel(Truck.MAX_POWER_LEVEL);
                     truck.setNeedCharge(false);
                     truck.setState(DeviceStateEnum.IDLE);
 
@@ -116,7 +127,7 @@ public class SimulationEngine {
                 log.info("时间:{} 集卡:{} 上报空闲，等待外部算法分配新指令", now, targetId);
                 break;
 
-            //  作业协同事件
+            // 作业协同事件
             case FETCH_DONE:
                 if (device != null) {
                     log.info("时间:{} 设备:{} 完成抓箱", now, device.getId());

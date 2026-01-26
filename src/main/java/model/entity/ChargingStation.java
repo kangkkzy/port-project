@@ -24,6 +24,9 @@ public class ChargingStation {
     private String truckId;     // 当前正在充电的集卡编号
     private Integer portCode;   // 充电接口数
 
+    // 充电速率
+    private Double chargeRate;
+
     /**
      * 判断充电桩是否空闲可用
      */
