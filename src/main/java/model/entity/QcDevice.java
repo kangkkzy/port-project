@@ -11,5 +11,7 @@ import lombok.EqualsAndHashCode;
 public class QcDevice extends BaseDevice {
     private String currentBlockBay; // 当前位置
     private String targetBlockBay;  // 目标移动位置
-    private Double hoistSpeed;      // 吊箱速度
+
+    // 垂直起升速度 (米/秒)
+    private Double hoistSpeed;
 }

@@ -5,6 +5,7 @@ import common.consts.DeviceStateEnum;
 import common.consts.ErrorCodes;
 import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
+import common.exception.BusinessException;
 import engine.SimulationEngine;
 import model.bo.GlobalContext;
 import model.dto.request.AssignTaskReq;
@@ -13,15 +14,14 @@ import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
-import model.entity.AscDevice;
 import model.entity.BaseDevice;
 import model.entity.ChargingStation;
 import model.entity.Fence;
 import model.entity.Point;
-import model.entity.QcDevice;
 import model.entity.Truck;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import service.algorithm.DevicePhysicsService;
 import service.algorithm.ExternalAlgorithmApi;
 
 import java.util.LinkedList;
@@ -33,14 +33,27 @@ import java.util.LinkedList;
 public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
 
     private final GlobalContext context = GlobalContext.getInstance();
-
+    private final SimulationEngine engine;
+    private final DevicePhysicsService physicsService;
     @Autowired
-    private SimulationEngine engine;
+    public ExternalAlgorithmServiceImpl(SimulationEngine engine, DevicePhysicsService physicsService) {
+        this.engine = engine;
+        this.physicsService = physicsService;
+    }
 
     @Override
     public Result moveDevice(MoveCommandReq req) {
         BaseDevice device = context.getDevice(req.getTruckId());
         if (device == null) return Result.error(ErrorCodes.DEVICE_NOT_FOUND);
+
+        try {
+            // 在起步前 动态获取该集卡的当前精确速度配置
+            double accurateSpeed = physicsService.getHorizontalSpeed(device.getId());
+            device.setSpeed(accurateSpeed);
+        } catch (BusinessException e) {
+            // 没有配置默认速度 直接报错
+            return Result.error("缺少集卡 [" + device.getId() + "] 的物理速度配置，禁止移动。");
+        }
 
         device.setWaypoints(new LinkedList<>(req.getPoints()));
         engine.scheduleEvent(context.getSimTime(), EventTypeEnum.MOVE_START, device.getId(), null);
@@ -58,28 +71,24 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
 
         double activeSpeed = 0.0;
 
-        // 判断移动维度，获取对应的速度
-        if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
-            // 龙门吊/桥吊横向移动速度
-            activeSpeed = device.getSpeed();
-        } else if (DeviceStateEnum.MOVE_VERTICAL.equals(req.getMoveType())) {
-            // 吊具垂直移动速度 (从龙门吊/桥吊特有字段中获取)
-            if (device instanceof QcDevice) {
-                activeSpeed = ((QcDevice) device).getHoistSpeed();
-            } else if (device instanceof AscDevice) {
-                activeSpeed = ((AscDevice) device).getHoistSpeed();
+        try {
+            // 根据移动维度 精确获取对应速度
+            if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
+                activeSpeed = physicsService.getHorizontalSpeed(device.getId());
+            } else if (DeviceStateEnum.MOVE_VERTICAL.equals(req.getMoveType())) {
+                activeSpeed = physicsService.getVerticalHoistSpeed(device.getId());
             }
+        } catch (BusinessException e) {
+            // 查不到速度直接报错
+            return Result.error("缺少大机 [" + device.getId() + "] 维度[" + req.getMoveType().getDesc() + "]的物理速度配置，作业取消。");
         }
 
-        if (activeSpeed <= 0.0) return Result.error("设备速度配置异常，无法计算移动时间");
+        if (activeSpeed <= 0.0) return Result.error("设备速度配置小于等于0，物理参数异常");
 
         // 时间 = 距离 / 速度 (乘以1000转换为毫秒)
         long travelTimeMS = (long) ((req.getDistance() / activeSpeed) * 1000);
 
-        // 设置龙门吊/桥吊当前工作状态 (横向或垂直)
         device.setState(req.getMoveType());
-
-        // 向未来注册到达事件
         engine.scheduleEvent(context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, device.getId(), null);
 
         return Result.success();
@@ -118,6 +127,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         return Result.success();
     }
 
+    // 充电时时间
     @Override
     public Result chargeTruck(ChargeCommandReq req) {
         Truck truck = context.getTruckMap().get(req.getTruckId());
@@ -128,20 +138,16 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
 
         if (!station.isAvailable()) return Result.error("该充电桩当前被占用或不可用");
 
-        //  锁定充电桩
         station.setTruckId(truck.getId());
         station.setStatus(DeviceStateEnum.WORKING.getCode());
 
-        //  更新集卡状态
         truck.setNeedCharge(true);
         truck.setTargetStationId(station.getStationCode());
 
-        //  将充电桩位置设为集卡的移动目标
         Point stationPos = new Point(station.getPosX(), station.getPosY());
         truck.getWaypoints().clear();
         truck.getWaypoints().add(stationPos);
 
-        //  触发移动事件
         engine.scheduleEvent(context.getSimTime(), EventTypeEnum.MOVE_START, truck.getId(), null);
 
         return Result.success();

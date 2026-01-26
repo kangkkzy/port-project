@@ -13,5 +13,7 @@ public class AscDevice extends BaseDevice {
     private String currentBlockBay;     // 当前位置
     private String targetBlockBay;      // 目标移动位置
     private List<String> enabledRangeList; // 负责的堆区
-    private Double hoistSpeed;          // 移动速度
+
+    // 垂直起升速度 (米/秒)
+    private Double hoistSpeed;
 }
