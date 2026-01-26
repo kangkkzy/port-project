@@ -7,6 +7,7 @@ import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
+import model.dto.response.AssignTaskResp;
 
 /**
  * 外部算法接入 API 接口
@@ -16,11 +17,11 @@ public interface ExternalAlgorithmApi {
     /** 运动控制 下发 集卡 的移动路径 */
     Result moveDevice(MoveCommandReq req);
 
-    /** 移动控制：控制桥吊/龙门吊进行横向大车移动或垂直起升 */
+    /** 移动控制 控制桥吊/龙门吊进行横向大车移动或垂直起升 */
     Result moveCrane(CraneMoveReq req);
 
-    /** 任务控制 设备指派业务任务 */
-    Result assignTask(AssignTaskReq req);
+    /** 任务控制 设备指派业务任务 支持闭环返回任务分配与耗电检查结果 */
+    AssignTaskResp assignTask(AssignTaskReq req);
 
     /** 环境控制 控制交通栅栏状态 (锁死/通行) */
     Result toggleFence(FenceControlReq req);

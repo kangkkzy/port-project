@@ -2,8 +2,8 @@ package service.algorithm;
 
 /**
  * 设备物理参数配置服务接口
- * 负责为仿真引擎提供去硬编码的物理属性如速度、耗电率等
- * Fail-Fast (快速失败)。任何设备如果没有明确配置物理参数，抛出异常
+ * 负责为仿真引擎提供去硬编码的物理属性如速度、耗电率、重载系数、安全阈值等。
+ * Fail-Fast (快速失败)。任何设备如果没有明确配置物理参数，抛出异常。
  */
 public interface DevicePhysicsService {
 
@@ -27,9 +27,26 @@ public interface DevicePhysicsService {
 
     /**
      * 获取电集卡的能耗率 (每米消耗的电量百分比)
+     * 对应于空载状态下的基础能耗
      * @param deviceId 设备ID
      * @return 耗电率
      * @throws common.exception.BusinessException 若查不到能耗配置时抛出
      */
     double getPowerConsumeRate(String deviceId);
+
+    /**
+     * 获取电集卡的重载能耗系数
+     * @param deviceId 设备ID
+     * @return 重载系数
+     * @throws common.exception.BusinessException 若查不到配置时抛出
+     */
+    double getLoadedConsumeCoefficient(String deviceId);
+
+    /**
+     * 获取设备的安全电量冗余阈值 (百分比)
+     * @param deviceId 设备ID
+     * @return 安全冗余阈值百分比
+     * @throws common.exception.BusinessException 若查不到配置时抛出
+     */
+    double getSafePowerThreshold(String deviceId);
 }

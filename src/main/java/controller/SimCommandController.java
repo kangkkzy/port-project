@@ -7,6 +7,7 @@ import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
 import model.dto.request.FenceControlReq;
 import model.dto.request.MoveCommandReq;
+import model.dto.response.AssignTaskResp;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import service.algorithm.ExternalAlgorithmApi;
@@ -34,7 +35,9 @@ public class SimCommandController {
 
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
-        return algorithmApi.assignTask(req);
+        // 使用新版的 AssignTaskResp 闭环返回
+        AssignTaskResp resp = algorithmApi.assignTask(req);
+        return Result.success(resp);
     }
 
     @PostMapping("/crane/operate")

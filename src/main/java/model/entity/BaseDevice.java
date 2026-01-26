@@ -5,6 +5,7 @@ import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
 import common.util.GisUtil;
+import engine.SimEvent;
 import engine.SimulationEngine;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -49,9 +50,9 @@ public abstract class BaseDevice {
         this.type = type;
     }
 
-    // 离散事件驱动逻辑
+    // 离散事件驱动逻辑 (通过了 parentEventId 进行事件溯源)
 
-    public void onMoveStart(long now, SimulationEngine engine) {
+    public void onMoveStart(long now, SimulationEngine engine, String parentEventId) {
         if (waypoints.isEmpty()) {
             this.state = DeviceStateEnum.IDLE;
             return;
@@ -67,7 +68,7 @@ public abstract class BaseDevice {
             return;
         }
 
-        // 栅栏限速检测 (如果没有限速，则使用设备自身的水平速度)
+        // 栅栏限速检测 (没有则使用设备自身的水平速度)
         double currentSpeed = applyFenceSpeedLimit(this.speed, nextTarget);
 
         // 计算物理到达时间
@@ -75,10 +76,16 @@ public abstract class BaseDevice {
         Point currentPos = new Point(this.posX, this.posY);
         long travelTimeMS = GisUtil.calculateTravelTimeMS(currentPos, nextTarget, currentSpeed);
 
-        engine.scheduleEvent(now + travelTimeMS, EventTypeEnum.ARRIVAL, this.id, nextTarget);
+        // 创建到达事件 绑定上游的 MoveStart 事件ID
+        SimEvent arrivalEvent = engine.scheduleEvent(parentEventId, now + travelTimeMS, EventTypeEnum.ARRIVAL, nextTarget);
+        if (this.type == DeviceTypeEnum.ASC || this.type == DeviceTypeEnum.QC) {
+            arrivalEvent.addSubject("CRANE", this.id);
+        } else {
+            arrivalEvent.addSubject("TRUCK", this.id);
+        }
     }
 
-    public void onArrival(Point reachedPoint, long now, SimulationEngine engine) {
+    public void onArrival(Point reachedPoint, long now, SimulationEngine engine, String parentEventId) {
         Point currentPos = new Point(this.posX, this.posY);
         double distance = GisUtil.getDistance(currentPos, reachedPoint);
 
@@ -93,10 +100,11 @@ public abstract class BaseDevice {
             truck.setPowerLevel(newPower);
         }
 
-        onMoveStart(now, engine);
+        // 递归调用继续移动 绑定 Arrival事件ID作为上游
+        onMoveStart(now, engine, parentEventId);
     }
 
-    // 辅助方法...
+    // 辅助方法
     private Fence getBlockingFence(Point target) {
         for (Fence fence : GlobalContext.getInstance().getFenceMap().values()) {
             if (fence.contains(target) && FenceStateEnum.BLOCKED.equals(fence.getStatus())) {
