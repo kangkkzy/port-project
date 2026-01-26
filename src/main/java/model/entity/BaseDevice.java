@@ -32,7 +32,7 @@ public abstract class BaseDevice {
     private Double posX = 0.0;      // X坐标
     private Double posY = 0.0;      // Y坐标
 
-    // 水平移动速度 (米/秒) 由外部配置接口注入
+    // 水平移动速度 由外部配置接口注入
     private Double speed;
 
     private List<String> inFenceIds = new ArrayList<>(); // 所在的栅栏列表
@@ -45,12 +45,13 @@ public abstract class BaseDevice {
     /**
      * 构造函数
      */
+    @SuppressWarnings("unused")
     public BaseDevice(String id, DeviceTypeEnum type) {
         this.id = id;
         this.type = type;
     }
 
-    // 离散事件驱动逻辑 (通过了 parentEventId 进行事件溯源)
+    // 离散事件驱动逻辑 (通过了 parentEventId 进行事件溯源
 
     public void onMoveStart(long now, SimulationEngine engine, String parentEventId) {
         if (waypoints.isEmpty()) {
@@ -68,7 +69,7 @@ public abstract class BaseDevice {
             return;
         }
 
-        // 栅栏限速检测 (没有则使用设备自身的水平速度)
+        // 栅栏限速检测 (没有则使用设备自身的水平速度
         double currentSpeed = applyFenceSpeedLimit(this.speed, nextTarget);
 
         // 计算物理到达时间
@@ -92,9 +93,7 @@ public abstract class BaseDevice {
         this.posX = reachedPoint.getX();
         this.posY = reachedPoint.getY();
         waypoints.poll();
-
-        if (this instanceof Truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
-            Truck truck = (Truck) this;
+        if (this instanceof Truck truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
             double consume = distance * truck.getConsumeRate();
             double newPower = Math.max(0.0, truck.getPowerLevel() - consume);
             truck.setPowerLevel(newPower);
@@ -107,7 +106,8 @@ public abstract class BaseDevice {
     // 辅助方法
     private Fence getBlockingFence(Point target) {
         for (Fence fence : GlobalContext.getInstance().getFenceMap().values()) {
-            if (fence.contains(target) && FenceStateEnum.BLOCKED.equals(fence.getStatus())) {
+            // 字符串匹配
+            if (fence.contains(target) && FenceStateEnum.BLOCKED.getCode().equals(fence.getStatus())) {
                 return fence;
             }
         }

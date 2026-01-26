@@ -4,7 +4,7 @@ import lombok.Data;
 
 /**
  * 任务指派响应 DTO
- * 外部算法不仅下发任务，还可以根据当前电量判断是否需要重定向到充电任务
+ * 外部算法不仅下发任务 还可以根据当前电量判断是否需要重定向到充电任务
  */
 @Data
 public class AssignTaskResp {
