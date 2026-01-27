@@ -1,39 +1,74 @@
 package engine;
 
 import common.consts.DeviceStateEnum;
+import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
 import common.consts.WiStatusEnum;
 import lombok.extern.slf4j.Slf4j;
 import model.bo.GlobalContext;
+import model.dto.request.CraneMoveReq;
+import model.dto.request.CraneOperationReq;
 import model.entity.*;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Component;
 
-import java.util.PriorityQueue;
+import java.util.*;
+import java.util.concurrent.PriorityBlockingQueue;
 
 /**
  * 离散事件仿真引擎
  */
 @Component
 @Slf4j
-public class SimulationEngine {
+public class SimulationEngine implements InitializingBean {
 
-    // 获取全局上下文 包含当前仿真时间、设备、地图、工单等状态
+    // 全局上下文 存储设备、工单和仿真时钟
     private final GlobalContext context = GlobalContext.getInstance();
 
-    // 事件优先队列  如果时间相同根据创建顺序排序
-    private final PriorityQueue<SimEvent> eventQueue = new PriorityQueue<>();
+    // 优先队列 保证事件永远按 triggerTime 从小到大
+    private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
 
-    // 用于防止出现 0 耗时的死循环
+    //防止死循环
     private static final int MAX_EVENTS_PER_TIMESTAMP = 10000;
 
+    // 处理器映射表 EventType -> EventHandler
+    private final Map<EventTypeEnum, EventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
+
+    @Override
+    public void afterPropertiesSet() {
+        //  注册外部指令处理器
+        register(EventTypeEnum.CMD_MOVE, new CmdMoveHandler());
+        register(EventTypeEnum.CMD_CHARGE, new CmdChargeHandler());
+        register(EventTypeEnum.CMD_FENCE_TOGGLE, new CmdFenceHandler());
+        register(EventTypeEnum.CMD_CRANE_MOVE, new CmdCraneMoveHandler());
+        register(EventTypeEnum.CMD_CRANE_OP, new CmdCraneOpHandler());
+
+        // 任务指派握手
+        register(EventTypeEnum.CMD_ASSIGN_TASK, new CmdAssignTaskHandler());
+        register(EventTypeEnum.CMD_TASK_ACK, new CmdTaskAckHandler());
+
+        // 注册内部物理流程处理器
+        register(EventTypeEnum.MOVE_START, new MoveStartHandler());
+        register(EventTypeEnum.ARRIVAL, new ArrivalHandler());
+        register(EventTypeEnum.CHARGING_START, new ChargingStartHandler());
+        register(EventTypeEnum.CHARGE_FULL, new ChargeFullHandler());
+        register(EventTypeEnum.REPORT_IDLE, new ReportIdleHandler());
+
+        //  作业协同 (抓/放/完成)
+        register(EventTypeEnum.FETCH_DONE, new FetchDoneHandler());
+        register(EventTypeEnum.PUT_DONE, new PutDoneHandler());
+        register(EventTypeEnum.WI_COMPLETE, new WiCompleteHandler());
+        register(EventTypeEnum.FENCE_CONTROL, new FenceControlHandler());
+    }
+
+    private void register(EventTypeEnum type, EventHandler handler) {
+        handlerMap.put(type, handler);
+    }
+
     /**
-     * 向未来注册（调度）一个事件
-     * @param parentEventId 触发该事件的父事件ID（用于事件溯源和现场复盘）
-     * @param triggerTime   事件发生的绝对时间戳
-     * @param type          事件类型 (如：到达、抓箱完成、开始移动)
-     * @param data          事件携带的数据 (如：目标坐标点)
-     * @return 返回生成的事件对象，以便后续为其添加参与的主体（Subject）
+     * 调度一个新事件
+     * @param triggerTime 触发时间 (ms)
      */
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
@@ -42,241 +77,386 @@ public class SimulationEngine {
     }
 
     /**
-     * 取消充电或排队未来事件的
-     */
-    @SuppressWarnings("unused")
-    public void cancelEvent(String eventId) {
-        for (SimEvent event : eventQueue) {
-            if (event.getEventId().equals(eventId)) {
-                // 仅做标记 不立即从队列移除 消费时会跳过
-                event.setCancelled(true);
-                log.info("事件 {} 已被标记为取消", eventId);
-                break;
-            }
-        }
-    }
-
-    /**
-     * 仿真推演主循环
+     * 推进仿真时钟直到目标时间
      */
     public void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
 
-        // 只要队列有事件 就一直处理
         while (!eventQueue.isEmpty()) {
             SimEvent nextEvent = eventQueue.peek();
 
-            // 如果下一个事件发生的时间超过了当前推演的目标时间 则暂停处理 跳出循环
-            // 仿真时钟停留在 targetSimTime
-            if (nextEvent.getTriggerTime() > targetSimTime) {
-                break;
-            }
+            // 如果最早事件的时间超过了目标时间 暂停处理
+            if (nextEvent.getTriggerTime() > targetSimTime) break;
 
-            // 从队列中取出该事件
             eventQueue.poll();
+            if (nextEvent.isCancelled()) continue;
 
-            //  取消检查 跳过已作废的事件
-            if (nextEvent.isCancelled()) {
-                log.debug("跳过已取消的事件: {}", nextEvent.getEventId());
-                continue;
-            }
-
-            //  防死循环机制
+            // 死循环检测
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > MAX_EVENTS_PER_TIMESTAMP) {
-                    log.error("检测到时间戳 {} 发生死循环，强制终止当前时间步的推演", lastProcessedTime);
-                    break; // 强制熔断
+                    log.error("检测到时间戳 {} 发生死循环，强制熔断", lastProcessedTime);
+                    break;
                 }
             } else {
                 lastProcessedTime = nextEvent.getTriggerTime();
-                sameTimeEventCount = 0; // 时间推进 计数器归零
+                sameTimeEventCount = 0;
             }
 
-            //   更新全局仿真时钟到当前事件发生的时间点
+            // 更新系统时钟 (Time Warp)
             context.setSimTime(nextEvent.getTriggerTime());
 
-            // 单个事件处理失败不能导致整个引擎崩溃
-            try {
-                handleEvent(nextEvent);
-            } catch (Exception e) {
-                log.error("处理事件异常! EventID: {}, Type: {}, Error: {}", nextEvent.getEventId(), nextEvent.getType(), e.getMessage(), e);
+            // 分发事件
+            EventHandler handler = handlerMap.get(nextEvent.getType());
+            if (handler != null) {
+                try {
+                    handler.handle(nextEvent, this, context);
+                } catch (Exception e) {
+                    log.error("事件处理异常: {}", nextEvent, e);
+                }
+            } else {
+                log.warn("未找到事件 {} 的处理器", nextEvent.getType());
             }
         }
-        // 推演结束，更新时钟到目标时间
+        // 强制对齐到目标时间
         context.setSimTime(targetSimTime);
     }
 
+    interface EventHandler {
+        void handle(SimEvent event, SimulationEngine engine, GlobalContext context);
+    }
+
+    // 事件处理
+
     /**
-     * 根据不同的事件类型，触发对应的物理状态变更或连锁事件。
+     * 任务指派：零延迟异步确认
      */
-    private void handleEvent(SimEvent event) {
-        long now = context.getSimTime();
+    static class CmdAssignTaskHandler implements EventHandler {
+        @Override
+        @SuppressWarnings("unchecked")
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String deviceId = event.getPrimarySubject("DEVICE");
+            if (deviceId == null) deviceId = event.getPrimarySubject("TRUCK");
 
-        // 提取主要参与主体（集卡优先 其次桥吊/龙门吊 其次栅栏）
-        String primaryTargetId = event.getPrimarySubject("TRUCK");
-        if (primaryTargetId == null) primaryTargetId = event.getPrimarySubject("CRANE");
-        if (primaryTargetId == null) primaryTargetId = event.getPrimarySubject("FENCE");
+            BaseDevice device = context.getDevice(deviceId);
+            if (device == null) return;
 
-        BaseDevice device = context.getDevice(primaryTargetId);
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
 
-        switch (event.getType()) {
-            // 物理移动流转
+            // 使用 context.getSimTime() 作为触发时间 实现 逻辑异步
+            SimEvent ackEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.CMD_TASK_ACK, payload);
+            ackEvent.addSubject("DEVICE", deviceId);
+        }
+    }
 
-            case MOVE_START:
-                // 设备开始移动（计算到下一个途径点的耗时 并生成一个未来的 ARRIVAL 事件
-                if (device != null) device.onMoveStart(now, this, event.getEventId());
-                break;
+    /**
+     * 任务确认：绑定工单，设备变忙
+     */
+    static class CmdTaskAckHandler implements EventHandler {
+        @Override
+        @SuppressWarnings("unchecked")
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String deviceId = event.getPrimarySubject("DEVICE");
+            BaseDevice device = context.getDevice(deviceId);
+            if (device == null) return;
 
-            case ARRIVAL:
-                if (device != null) {
-                    Point reachedPoint = (Point) event.getData();
-                    // 处理到达逻辑（更新坐标 扣减电量
-                    device.onArrival(reachedPoint, now, this, event.getEventId());
-                    if (device instanceof Truck truck && device.getWaypoints().isEmpty()) {
-                        if (truck.getTargetStationId() != null) {
-                            SimEvent chargeEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.CHARGING_START, null);
-                            chargeEvent.addSubject("TRUCK", truck.getId());
-                            chargeEvent.addSubject("STATION", truck.getTargetStationId());
-                        }
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
+            String wiRefNo = (String) payload.get("wiRefNo");
+
+            device.setCurrWiRefNo(wiRefNo);
+
+            // ASC/QC  确认任务后立即进入工作状态
+            if (device.getType() == DeviceTypeEnum.ASC || device.getType() == DeviceTypeEnum.QC) {
+                device.setState(DeviceStateEnum.WORKING);
+            }
+            log.info("设备 {} 确认任务 {}, 绑定完成", deviceId, wiRefNo);
+        }
+    }
+
+    /**
+     * 移动指令
+     */
+    static class CmdMoveHandler implements EventHandler {
+        @Override
+        @SuppressWarnings("unchecked")
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String truckId = event.getPrimarySubject("TRUCK");
+            BaseDevice device = context.getDevice(truckId);
+            if (device == null) return;
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
+
+            device.setSpeed((Double) payload.get("speed"));
+            device.setWaypoints(new LinkedList<>((List<Point>) payload.get("points")));
+
+            SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
+            moveStart.addSubject("TRUCK", truckId);
+        }
+    }
+
+    /**
+     * 充电指令
+     */
+    static class CmdChargeHandler implements EventHandler {
+        @Override
+        @SuppressWarnings("unchecked")
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String truckId = event.getPrimarySubject("TRUCK");
+            Truck truck = context.getTruckMap().get(truckId);
+            if (truck == null) return;
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
+            String stationId = (String) payload.get("stationId");
+            ChargingStation station = context.getChargingStationMap().get(stationId);
+
+            if (station != null && station.isAvailable()) {
+                station.setTruckId(truckId);
+                station.setStatus(DeviceStateEnum.WORKING.getCode()); // 锁定桩
+                truck.setNeedCharge(true);
+                truck.setTargetStationId(stationId);
+                truck.setWaypoints(new LinkedList<>((List<Point>) payload.get("points")));
+
+                SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
+                moveStart.addSubject("TRUCK", truckId);
+            }
+        }
+    }
+
+    // 栅栏控制
+    static class CmdFenceHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String fenceId = event.getPrimarySubject("FENCE");
+            Fence fence = context.getFenceMap().get(fenceId);
+            if (fence != null) {
+                FenceStateEnum status = (FenceStateEnum) event.getData();
+                SimEvent ctrlEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.FENCE_CONTROL, status);
+                ctrlEvent.addSubject("FENCE", fenceId);
+            }
+        }
+    }
+
+    /**
+     * 起重机移动
+     */
+    static class CmdCraneMoveHandler implements EventHandler {
+        @Override
+        @SuppressWarnings("unchecked")
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String craneId = event.getPrimarySubject("CRANE");
+            BaseDevice device = context.getDevice(craneId);
+            if (device == null) return;
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
+            CraneMoveReq req = (CraneMoveReq) payload.get("req");
+            Double speed = (Double) payload.get("speed");
+
+            long travelTimeMS = (long) ((req.getDistance() / speed) * 1000);
+            device.setState(req.getMoveType());
+
+            SimEvent arrEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, null);
+            arrEvent.addSubject("CRANE", device.getId());
+        }
+    }
+
+    /**
+     * 起重机操作
+     */
+    static class CmdCraneOpHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            CraneOperationReq req = (CraneOperationReq) event.getData();
+            SimEvent opEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + req.getDurationMS(), req.getAction(), null);
+            opEvent.addSubject("CRANE", req.getCraneId());
+        }
+    }
+
+    //   物理流程
+
+    static class MoveStartHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String deviceId = event.getPrimarySubject("TRUCK");
+            if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
+            BaseDevice device = context.getDevice(deviceId);
+            if (device != null) device.onMoveStart(context.getSimTime(), engine, event.getEventId());
+        }
+    }
+
+    static class ArrivalHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String id = event.getPrimarySubject("TRUCK");
+            if(id==null) id = event.getPrimarySubject("CRANE");
+            BaseDevice d = context.getDevice(id);
+            if(d != null) {
+                d.onArrival((Point)event.getData(), context.getSimTime(), engine, event.getEventId());
+
+                //  电集卡到达目标充电桩 自动开始充电
+                if (d instanceof Truck truck && truck.getType() == DeviceTypeEnum.ELECTRIC_TRUCK && d.getWaypoints().isEmpty()) {
+                    if (truck.getTargetStationId() != null) {
+                        SimEvent chargeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.CHARGING_START, null);
+                        chargeEvent.addSubject("TRUCK", truck.getId());
+                        chargeEvent.addSubject("STATION", truck.getTargetStationId());
                     }
                 }
-                break;
+            }
+        }
+    }
 
-            //  充电流转逻辑
+    /**
+     * 开始充电
+     */
+    static class ChargingStartHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String truckId = event.getPrimarySubject("TRUCK");
+            Truck truck = context.getTruckMap().get(truckId);
+            String stationId = event.getPrimarySubject("STATION");
+            ChargingStation station = context.getChargingStationMap().get(stationId);
 
-            case CHARGING_START:
-                if (device instanceof Truck truck) {
-                    device.setState(DeviceStateEnum.CHARGING);
-
-                    String stationId = event.getPrimarySubject("STATION");
-                    ChargingStation station = context.getChargingStationMap().get(stationId);
-
-                    // 动态计算充电耗时 = 缺少的电量 / 充电速率
-                    double powerNeeded = Truck.MAX_POWER_LEVEL - truck.getPowerLevel();
-                    double rate = (station != null && station.getChargeRate() != null) ? station.getChargeRate() : 0.00001;
-                    long chargeDurationMS = (long) (powerNeeded / rate);
-
-                    log.info("时间:{} 集卡:{} 开始充电。预计耗时:{}ms", now, primaryTargetId, chargeDurationMS);
-
-                    // 向未来注册 充电完成 事件
-                    SimEvent chargeFullEvent = scheduleEvent(event.getEventId(), now + chargeDurationMS, EventTypeEnum.CHARGE_FULL, null);
-                    chargeFullEvent.addSubject("TRUCK", primaryTargetId);
-                    chargeFullEvent.addSubject("STATION", stationId);
+            if (truck != null) {
+                //  充电桩必须存在
+                if (station == null) {
+                    throw new IllegalArgumentException("仿真异常: 试图在不存在的充电桩 [" + stationId + "] 进行充电");
                 }
-                break;
 
-            case CHARGE_FULL:
-                if (device instanceof Truck truck) {
-                    // 恢复满电状态
-                    truck.setPowerLevel(Truck.MAX_POWER_LEVEL);
-                    truck.setNeedCharge(false);
-                    truck.setState(DeviceStateEnum.IDLE);
-
-                    // 释放充电桩资源
-                    String stationId = event.getPrimarySubject("STATION");
-                    ChargingStation station = context.getChargingStationMap().get(stationId);
-                    if (station != null) {
-                        station.setTruckId(null);
-                        station.setStatus(DeviceStateEnum.IDLE.getCode());
-                    }
-                    truck.setTargetStationId(null);
-
-                    log.info("时间:{} 集卡:{} 充电完成，上报空闲", now, primaryTargetId);
-                    // 触发 集卡空闲 通知外部算法可以派发新任务了
-                    SimEvent idleEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.REPORT_IDLE, null);
-                    idleEvent.addSubject("TRUCK", primaryTargetId);
+                //  费率必须配置且大于0
+                Double rate = station.getChargeRate();
+                if (rate == null || rate <= 0) {
+                    throw new IllegalArgumentException("配置错误: 充电桩 [" + stationId + "] 的充电速率配置无效 (当前值: " + rate + ")，无法计算时长");
                 }
-                break;
 
-            case REPORT_IDLE:
-                // 外部算法此时会检测到集卡 IDLE 进而调用 /sim/command/assign 分配新任务
-                log.info("时间:{} 集卡:{} 上报空闲，由外部算法接管决策", now, primaryTargetId);
-                break;
+                truck.setState(DeviceStateEnum.CHARGING);
+                double powerNeeded = Truck.MAX_POWER_LEVEL - truck.getPowerLevel();
 
-            // 事件协同逻辑
+                //   计算
+                long chargeDurationMS = (long) (powerNeeded / rate);
 
-            case FETCH_DONE:
-                if (device != null) {
-                    log.info("时间:{} 设备:{} 完成抓起动作 (集装箱离开原位置)", now, device.getId());
-                    WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
-                    if (wi != null) {
-                        // 场景判定：抓箱设备是 终点桥吊/龙门吊 (如卸船时的岸桥/进港时的龙门吊
-                        if (device.getId().equals(wi.getPutCheId()) && wi.getCarryCheId() != null) {
-                            log.info("物理协同: 集卡 {} 已卸空，释放交由外部算法决策去向", wi.getCarryCheId());
-                            // 集卡空了 触发 REPORT_IDLE 释放集卡
-                            SimEvent idleEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.REPORT_IDLE, null);
+                // 预约 充电完成 事件
+                SimEvent fullEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + chargeDurationMS, EventTypeEnum.CHARGE_FULL, null);
+                fullEvent.addSubject("TRUCK", truckId);
+                fullEvent.addSubject("STATION", stationId);
+
+                log.info("集卡 {} 开始充电，需补充电量: {}, 预计耗时: {}ms", truckId, powerNeeded, chargeDurationMS);
+            } else {
+                log.warn("充电事件异常: 未找到集卡 ID [{}]", truckId);
+            }
+        }
+    }
+
+    static class ChargeFullHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String truckId = event.getPrimarySubject("TRUCK");
+            Truck truck = context.getTruckMap().get(truckId);
+            String stationId = event.getPrimarySubject("STATION");
+            ChargingStation station = context.getChargingStationMap().get(stationId);
+            if (truck != null) {
+                truck.setPowerLevel(Truck.MAX_POWER_LEVEL);
+                truck.setNeedCharge(false);
+                truck.setState(DeviceStateEnum.IDLE);
+                truck.setTargetStationId(null);
+            }
+            if (station != null) {
+                station.setTruckId(null);
+                station.setStatus(DeviceStateEnum.IDLE.getCode());
+            }
+            SimEvent idleEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.REPORT_IDLE, null);
+            idleEvent.addSubject("TRUCK", truckId);
+        }
+    }
+
+    static class ReportIdleHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String truckId = event.getPrimarySubject("TRUCK");
+            Truck truck = context.getTruckMap().get(truckId);
+            if (truck == null) return;
+            log.info("集卡 {} 上报空闲", truckId);
+            truck.setState(DeviceStateEnum.IDLE);
+        }
+    }
+
+    /**
+     * 抓箱完成处理
+     */
+    static class FetchDoneHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String deviceId = event.getPrimarySubject("CRANE");
+            BaseDevice device = context.getDevice(deviceId);
+            if (device != null) {
+                WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
+                if (wi != null && device.getId().equals(wi.getPutCheId()) && wi.getCarryCheId() != null) {
+                    SimEvent idleEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.REPORT_IDLE, null);
+                    idleEvent.addSubject("TRUCK", wi.getCarryCheId());
+                }
+            }
+        }
+    }
+
+    /**
+     * 放箱完成处理
+     */
+    static class PutDoneHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String deviceId = event.getPrimarySubject("CRANE");
+            BaseDevice device = context.getDevice(deviceId);
+            if (device != null) {
+                WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
+                if (wi != null) {
+                    // [场景A] 装车逻辑 (Loading: Yard -> Truck)
+                    // 场景：当前设备是任务的 FetchChe (提箱者，如场桥)，
+                    // 它刚刚完成 Put (放到集卡上)。此时集卡(CarryChe) 获得了箱子。
+                    if (device.getId().equals(wi.getFetchCheId()) && wi.getCarryCheId() != null) {
+                        if (wi.getPutCheId() != null) {
+                            // 还有下一程 (例如：运往岸桥) -> 触发集卡移动
+                            SimEvent moveEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
+                            moveEvent.addSubject("TRUCK", wi.getCarryCheId());
+                        } else {
+                            // 无下一程，任务链结束 -> 完结工单，释放集卡
+                            SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
+                            completeEvent.addSubject("WI", device.getCurrWiRefNo());
+                            SimEvent idleEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.REPORT_IDLE, null);
                             idleEvent.addSubject("TRUCK", wi.getCarryCheId());
                         }
+                        device.setState(DeviceStateEnum.IDLE); // 起重机任务完成，变空闲
+                    }
+                    // [场景B] 卸车逻辑结束 (Unloading Finish)
+                    // 场景：当前设备是任务的 PutChe (堆场吊)，完成最终放箱(放到堆场)。
+                    else if (device.getId().equals(wi.getPutCheId())) {
+                        SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
+                        completeEvent.addSubject("WI", device.getCurrWiRefNo());
+                        device.setState(DeviceStateEnum.IDLE);
                     }
                 }
-                break;
+            }
+        }
+    }
 
-            case PUT_DONE:
-                if (device != null) {
-                    log.info("时间:{} 设备:{} 完成放置动作 (集装箱落位)", now, device.getId());
-                    WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
-                    if (wi != null) {
+    // 工单完成
+    static class WiCompleteHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String wiRefNo = event.getPrimarySubject("WI");
+            WorkInstruction doneWi = context.getWorkInstructionMap().get(wiRefNo);
+            if (doneWi != null) doneWi.setWiStatus(WiStatusEnum.COMPLETED.getCode());
+        }
+    }
 
-                        // 场景A： 起点桥吊/龙门吊 完成了放箱
-                        if (device.getId().equals(wi.getFetchCheId()) && wi.getCarryCheId() != null) {
-                            if (wi.getPutCheId() != null) {
-                                // A.1 有终点桥吊/龙门吊 集卡载着箱子开始移动
-                                log.info("物理协同: 集卡 {} 装载完成，有下游设备[{}]，触发移动", wi.getCarryCheId(), wi.getPutCheId());
-                                SimEvent moveEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.MOVE_START, null);
-                                moveEvent.addSubject("TRUCK", wi.getCarryCheId());
-                            } else {
-                                // A.2 无终点桥吊/龙门吊 (外集卡提箱直接离港) 直接作业结束
-                                log.info("物理协同: 集卡 {} 装载完成且无下游设备，释放交由外部算法处理离港", wi.getCarryCheId());
-                                SimEvent idleEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.REPORT_IDLE, null);
-                                idleEvent.addSubject("TRUCK", wi.getCarryCheId());
-
-                                SimEvent wiCompleteEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.WI_COMPLETE, null);
-                                wiCompleteEvent.addSubject("WI", device.getCurrWiRefNo());
-                            }
-                            device.setState(DeviceStateEnum.IDLE); // 释放起点桥吊/龙门吊
-                        }
-
-                        // 场景B： 终点桥吊/龙门吊 完成了放箱
-                        else if (device.getId().equals(wi.getPutCheId())) {
-                            log.info("物理协同: 终点落箱完成，工单归档");
-                            // 触发工单完成事件
-                            SimEvent wiCompleteEvent = scheduleEvent(event.getEventId(), now, EventTypeEnum.WI_COMPLETE, null);
-                            wiCompleteEvent.addSubject("WI", device.getCurrWiRefNo());
-                            device.setState(DeviceStateEnum.IDLE); // 释放终点桥吊/龙门吊
-                        }
-                    }
+    // 栅栏控制
+    static class FenceControlHandler implements EventHandler {
+        @Override
+        public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            String fenceId = event.getPrimarySubject("FENCE");
+            Fence fence = context.getFenceMap().get(fenceId);
+            if (fence != null) {
+                FenceStateEnum status = (FenceStateEnum) event.getData();
+                fence.setStatus(status.getCode());
+                if (FenceStateEnum.PASSABLE.equals(status)) {
+                    fence.onOpen(context.getSimTime(), engine, event.getEventId());
                 }
-                break;
-
-            case WI_COMPLETE:
-                // 更新工单状态为已完成 释放相关资源
-                String wiRefNo = event.getPrimarySubject("WI");
-                WorkInstruction doneWi = context.getWorkInstructionMap().get(wiRefNo);
-                if (doneWi != null) {
-                    doneWi.setWiStatus(WiStatusEnum.COMPLETED.getCode());
-                    log.info("时间:{} 工单:{} 作业彻底结束，相关资源释放", now, wiRefNo);
-                }
-                break;
-
-            // 环境控制事件
-
-            case FENCE_CONTROL:
-                // 处理动态栅栏的开启/锁死 控制交通流
-                Fence fence = context.getFenceMap().get(primaryTargetId);
-                if (fence != null) {
-                    FenceStateEnum targetStatus = (FenceStateEnum) event.getData();
-                    fence.setStatus(targetStatus.getCode());
-                    // 如果栅栏打开 触发被堵塞车辆的恢复移动
-                    if (FenceStateEnum.PASSABLE.equals(targetStatus)) {
-                        fence.onOpen(now, this, event.getEventId());
-                    }
-                }
-                break;
-
-            default:
-                break;
+            }
         }
     }
 }

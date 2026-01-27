@@ -1,12 +1,7 @@
 package controller;
 
 import common.Result;
-import model.dto.request.AssignTaskReq;
-import model.dto.request.ChargeCommandReq;
-import model.dto.request.CraneMoveReq;
-import model.dto.request.CraneOperationReq;
-import model.dto.request.FenceControlReq;
-import model.dto.request.MoveCommandReq;
+import model.dto.request.*;
 import model.dto.response.AssignTaskResp;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +20,7 @@ public class SimCommandController {
         this.algorithmApi = algorithmApi;
     }
 
-    //  移动控制
+    //  移动控制 集卡/桥吊/龙门吊
 
     @PostMapping("/truck/move")
     public Result moveTruck(@RequestBody MoveCommandReq req) {
@@ -37,24 +32,24 @@ public class SimCommandController {
         return algorithmApi.moveCrane(req);
     }
 
-    //   业务与环境控制
+    //   业务与环境控制 处理任务分配 设备具体操作及环境设施变更
 
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
         AssignTaskResp resp = algorithmApi.assignTask(req);
         return Result.success(resp);
     }
-
+    // 吊起操作的接口
     @PostMapping("/crane/operate")
     public Result operateCrane(@RequestBody CraneOperationReq req) {
         return algorithmApi.operateCrane(req);
     }
-
+    // 围栏
     @PostMapping("/fence")
     public Result controlFence(@RequestBody FenceControlReq req) {
         return algorithmApi.toggleFence(req);
     }
-
+    // 电集卡充电
     @PostMapping("/truck/charge")
     public Result chargeTruck(@RequestBody ChargeCommandReq req) {
         return algorithmApi.chargeTruck(req);

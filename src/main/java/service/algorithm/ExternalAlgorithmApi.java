@@ -1,11 +1,7 @@
 package service.algorithm;
 
 import common.Result;
-import model.dto.request.AssignTaskReq;
-import model.dto.request.ChargeCommandReq;
-import model.dto.request.CraneMoveReq;
-import model.dto.request.CraneOperationReq;
-import model.dto.request.FenceControlReq;
+import model.dto.request.*;
 import model.dto.request.MoveCommandReq;
 import model.dto.response.AssignTaskResp;
 

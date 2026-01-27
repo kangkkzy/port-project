@@ -14,34 +14,33 @@ import java.util.List;
  */
 @Data
 public class Fence {
-    private String nodeId;      // 栅栏id
-    private String blockCode;   // 箱区号
-    private Double posX;        // x坐标
-    private Double posY;        // y坐标
+    private String nodeId;
+    private String blockCode;
+    private Double posX;
+    private Double posY;
     private Double radius;
-    private Double speedLimit;  // 速度限制
+    private Double speedLimit;
 
-    // 默认通行
     private String status = FenceStateEnum.PASSABLE.getCode();
 
-    //  被这个栅栏挡住的车辆 ID 列表
+    // 被挡住的车辆ID列表
     private List<String> waitingTrucks = new ArrayList<>();
+
+    private long releaseHeadway = 2000L;
 
     public boolean contains(Point target) {
         double distance = Math.hypot(posX - target.getX(), posY - target.getY());
         return distance <= radius;
     }
 
-    /**
-     * 响应事件：栅栏开启 (通过 parentEventId 进行追溯)
-     */
     public void onOpen(long now, SimulationEngine engine, String parentEventId) {
         this.status = FenceStateEnum.PASSABLE.getCode();
 
-        //  唤醒所有等待的集卡 恢复它们的移动
+        long delay = 0;
         for (String truckId : waitingTrucks) {
-            SimEvent moveEvent = engine.scheduleEvent(parentEventId, now, EventTypeEnum.MOVE_START, null);
+            SimEvent moveEvent = engine.scheduleEvent(parentEventId, now + delay, EventTypeEnum.MOVE_START, null);
             moveEvent.addSubject("TRUCK", truckId);
+            delay += releaseHeadway;
         }
         waitingTrucks.clear();
     }
