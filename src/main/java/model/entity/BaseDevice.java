@@ -4,6 +4,7 @@ import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
+import common.exception.BusinessException;
 import common.util.GisUtil;
 import engine.SimEvent;
 import engine.SimulationEngine;
@@ -13,17 +14,20 @@ import lombok.NoArgsConstructor;
 import model.bo.GlobalContext;
 
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Queue;
 
 /**
  * 设备基类
+ * 核心原则：无状态记忆、无默认决策。一切行动听从外部指令。
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public abstract class BaseDevice {
+
+    // --- 常量定义 (消除硬编码) ---
+    // 到达目标点的判定阈值 (米)
+    private static final double ARRIVAL_THRESHOLD = 0.01;
 
     //  基础信息
     private String id;               // 设备ID
@@ -33,17 +37,20 @@ public abstract class BaseDevice {
     //  物理属性
     private Double posX = 0.0;       // X坐标
     private Double posY = 0.0;       // Y坐标
-    private Double speed;            // 移动速度
+
+    // [注意] 速度属性不再有默认值，必须由每次移动指令显式设置
+    private Double speed;
 
     //  业务数据
     private List<String> inFenceIds = new ArrayList<>();  // 目前的围栏ID
     private String currWiRefNo;                           // 当前绑定的任务号
     private List<String> notDoneWiList = new ArrayList<>(); // 待执行任务列表
-    private Queue<Point> waypoints = new LinkedList<>();    // 待行驶的路径点队列
+
+    // 单步目标点 (无队列)
+    private Point currentTargetPos;
 
     //  移动插值辅助
     private Point lastStartPos;       // 上次出发点
-    private Point currentTargetPos;   // 正在前往的目标点
     private long lastMoveStartTime;   // 上次出发时间
 
     @SuppressWarnings("unused")
@@ -53,39 +60,51 @@ public abstract class BaseDevice {
     }
 
     /**
-     * 核心逻辑：开始向下一个点移动
+     * 核心逻辑：开始向目标点移动 (单步)
      */
     public void onMoveStart(long now, SimulationEngine engine, String parentEventId) {
-        // 无路径点则停止
-        if (waypoints.isEmpty()) {
+        // 1. 严格参数校验
+        if (currentTargetPos == null) {
+            // 防御性编程：如果没有目标点，直接置为空闲，防止异常状态卡死
             this.state = DeviceStateEnum.IDLE;
             return;
         }
 
-        Point nextTarget = waypoints.peek();
+        // 必须由外部指定速度
+        if (this.speed == null || this.speed <= 0) {
+            throw new BusinessException(String.format("设备 [%s] 启动失败: 未设置移动速度，外部算法必须在指令中明确指定 speed。", this.id));
+        }
 
-        // 检查前方是否有关闭的栅栏
-        Fence blockingFence = getBlockingFence(nextTarget);
-        if (blockingFence != null) {
-            this.state = DeviceStateEnum.WAITING;
-            blockingFence.getWaitingTrucks().add(this.id); // 加入等待队列
+        // 2. 校验是否已在目标位置
+        Point currentPos = new Point(this.posX, this.posY);
+        if (GisUtil.getDistance(currentPos, currentTargetPos) <= ARRIVAL_THRESHOLD) {
+            // 已经在位置上了，直接触发到达
+            onArrival(currentTargetPos, now, engine, parentEventId);
             return;
         }
 
-        // 计算限速后的实际速度
-        double currentSpeed = applyFenceSpeedLimit(this.speed, nextTarget);
+        // 3. 环境约束检查 (围栏)
+        Fence blockingFence = getBlockingFence(currentTargetPos);
+        if (blockingFence != null) {
+            this.state = DeviceStateEnum.WAITING;
+            blockingFence.getWaitingTrucks().add(this.id); // 加入围栏等待队列
+            return;
+        }
 
-        // 更新状态为移动中
+        // 4. 执行移动
+        // 计算受环境影响后的实际速度 (例如围栏限速)
+        double actualSpeed = applyFenceSpeedLimit(this.speed, currentTargetPos);
+
+        // 更新状态
         this.state = DeviceStateEnum.MOVING;
-        this.lastStartPos = new Point(this.posX, this.posY);
-        this.currentTargetPos = nextTarget;
+        this.lastStartPos = currentPos;
         this.lastMoveStartTime = now;
 
-        // 计算到达所需秒数
-        long travelTimeMS = GisUtil.calculateTravelTimeMS(new Point(this.posX, this.posY), nextTarget, currentSpeed);
+        // 计算物理耗时
+        long travelTimeMS = GisUtil.calculateTravelTimeMS(currentPos, currentTargetPos, actualSpeed);
 
-        // 调度未来的到达事件
-        SimEvent arrivalEvent = engine.scheduleEvent(parentEventId, now + travelTimeMS, EventTypeEnum.ARRIVAL, nextTarget);
+        // 调度到达事件
+        SimEvent arrivalEvent = engine.scheduleEvent(parentEventId, now + travelTimeMS, EventTypeEnum.ARRIVAL, currentTargetPos);
 
         // 标记事件主体
         if (this.type == DeviceTypeEnum.ASC || this.type == DeviceTypeEnum.QC) {
@@ -96,54 +115,58 @@ public abstract class BaseDevice {
     }
 
     /**
-     * 获取当前时刻的估算坐标
-     */
-    public Point getInterpolatedPos(long currentSimTime) {
-        if (state != DeviceStateEnum.MOVING || currentTargetPos == null || lastStartPos == null) {
-            return new Point(posX, posY);
-        }
-
-        double totalDist = GisUtil.getDistance(lastStartPos, currentTargetPos);
-        if (totalDist <= 0.001) return currentTargetPos;
-
-        // 计算移动进度
-        long elapsedTime = currentSimTime - lastMoveStartTime;
-        double movedDist = (elapsedTime / 1000.0) * speed;
-
-        if (movedDist >= totalDist) return currentTargetPos;
-
-        // 线性插值计算当前坐标
-        double ratio = movedDist / totalDist;
-        double newX = lastStartPos.getX() + (currentTargetPos.getX() - lastStartPos.getX()) * ratio;
-        double newY = lastStartPos.getY() + (currentTargetPos.getY() - lastStartPos.getY()) * ratio;
-        return new Point(newX, newY);
-    }
-
-    /**
      * 到达目的地后的回调
      */
     public void onArrival(Point reachedPoint, long now, SimulationEngine engine, String parentEventId) {
         Point currentPos = new Point(this.posX, this.posY);
         double distance = GisUtil.getDistance(currentPos, reachedPoint);
 
-        //   更新物理坐标
+        // 1. 更新物理坐标
         this.posX = reachedPoint.getX();
         this.posY = reachedPoint.getY();
 
-        //   清理插值数据，移除已到达的点
-        this.lastStartPos = null;
-        this.currentTargetPos = null;
-        waypoints.poll();
-
-        //  电集卡扣减电量
+        // 2. 物理结算 (如耗电)
+        // 注意：耗电率属于设备固有物理属性，保留在此处计算是合理的
         if (this instanceof Truck truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
-            double consume = distance * truck.getConsumeRate();
-            double newPower = Math.max(0.0, truck.getPowerLevel() - consume);
-            truck.setPowerLevel(newPower);
+            if (truck.getConsumeRate() != null && truck.getConsumeRate() > 0) {
+                double consume = distance * truck.getConsumeRate();
+                double newPower = Math.max(0.0, truck.getPowerLevel() - consume);
+                truck.setPowerLevel(newPower);
+            }
         }
 
-        //   继续前往下一个点
-        onMoveStart(now, engine, parentEventId);
+        // 3. 状态清理
+        this.lastStartPos = null;
+        this.currentTargetPos = null;
+        this.speed = null; // [关键] 清除速度，强制下一次移动必须重新指定
+
+        // 4. 停止并等待
+        // 只有收到下一个 CMD_MOVE 事件，状态才会再次变为 MOVING
+        this.state = DeviceStateEnum.IDLE;
+    }
+
+    /**
+     * 获取当前时刻的估算坐标 (插值)
+     */
+    public Point getInterpolatedPos(long currentSimTime) {
+        // 如果不在移动状态，或者缺乏必要的插值参数，直接返回当前坐标
+        if (state != DeviceStateEnum.MOVING || currentTargetPos == null || lastStartPos == null || speed == null) {
+            return new Point(posX, posY);
+        }
+
+        double totalDist = GisUtil.getDistance(lastStartPos, currentTargetPos);
+        if (totalDist <= ARRIVAL_THRESHOLD) return currentTargetPos;
+
+        long elapsedTime = currentSimTime - lastMoveStartTime;
+        // 使用当前指令指定的速度进行插值
+        double movedDist = (elapsedTime / 1000.0) * speed;
+
+        if (movedDist >= totalDist) return currentTargetPos;
+
+        double ratio = movedDist / totalDist;
+        double newX = lastStartPos.getX() + (currentTargetPos.getX() - lastStartPos.getX()) * ratio;
+        double newY = lastStartPos.getY() + (currentTargetPos.getY() - lastStartPos.getY()) * ratio;
+        return new Point(newX, newY);
     }
 
     // 检查目标点是否在"阻断"状态的围栏内

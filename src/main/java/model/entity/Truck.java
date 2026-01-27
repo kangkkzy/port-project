@@ -17,11 +17,9 @@ public class Truck extends BaseDevice {
     private Double consumeRate;     // 耗电率
 
     private Integer laneNo;         // 车道号
-
-    // Truck220 双箱限制 (0-关/1-装/2-卸/3-装卸都允许)
-    private Integer dualCarryMode;
+    private Integer dualCarryMode;  // 双箱限制
 
     // 充电相关
-    private boolean needCharge;     // 是否需要充电
-    private String targetStationId; // 目标充电桩ID
+    private boolean needCharge;     // 状态标记：是否需要充电 (仅作信息展示)
+    private String targetStationId; // 目标充电桩ID (用于充电时的校验)
 }
