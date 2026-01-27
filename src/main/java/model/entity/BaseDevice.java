@@ -25,10 +25,6 @@ import java.util.List;
 @AllArgsConstructor
 public abstract class BaseDevice {
 
-    // --- 常量定义 (消除硬编码) ---
-    // 到达目标点的判定阈值 (米)
-    private static final double ARRIVAL_THRESHOLD = 0.01;
-
     //  基础信息
     private String id;               // 设备ID
     private DeviceTypeEnum type;     // 设备类型
@@ -77,7 +73,10 @@ public abstract class BaseDevice {
 
         // 2. 校验是否已在目标位置
         Point currentPos = new Point(this.posX, this.posY);
-        if (GisUtil.getDistance(currentPos, currentTargetPos) <= ARRIVAL_THRESHOLD) {
+        double arrivalThreshold = GlobalContext.getInstance()
+                .getPhysicsConfig()
+                .getArrivalThreshold();
+        if (GisUtil.getDistance(currentPos, currentTargetPos) <= arrivalThreshold) {
             // 已经在位置上了，直接触发到达
             onArrival(currentTargetPos, now, engine, parentEventId);
             return;
@@ -155,7 +154,10 @@ public abstract class BaseDevice {
         }
 
         double totalDist = GisUtil.getDistance(lastStartPos, currentTargetPos);
-        if (totalDist <= ARRIVAL_THRESHOLD) return currentTargetPos;
+        double arrivalThreshold = GlobalContext.getInstance()
+                .getPhysicsConfig()
+                .getArrivalThreshold();
+        if (totalDist <= arrivalThreshold) return currentTargetPos;
 
         long elapsedTime = currentSimTime - lastMoveStartTime;
         // 使用当前指令指定的速度进行插值

@@ -1,5 +1,6 @@
 package engine;
 
+import common.config.PhysicsConfig;
 import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
@@ -7,25 +8,29 @@ import common.consts.FenceStateEnum;
 import common.consts.WiStatusEnum;
 import common.exception.BusinessException;
 import common.util.GisUtil;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import model.bo.GlobalContext;
 import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
+import model.dto.snapshot.EventLogEntryDto;
 import model.entity.*;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.concurrent.PriorityBlockingQueue;
+
+import service.algorithm.impl.SimulationEventLog;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class SimulationEngine implements InitializingBean {
 
-    // --- 常量定义 ---
-    private static final int MAX_EVENTS_PER_TIMESTAMP = 10000;
-    private static final double CHARGE_ALIGN_THRESHOLD = 5.0;
-
+    private final PhysicsConfig physicsConfig;
+    private final SimulationEventLog eventLog;
     private final GlobalContext context = GlobalContext.getInstance();
     private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
     private final Map<EventTypeEnum, EventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
@@ -67,6 +72,8 @@ public class SimulationEngine implements InitializingBean {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
 
+        int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp();
+
         while (!eventQueue.isEmpty()) {
             SimEvent nextEvent = eventQueue.peek();
             if (nextEvent.getTriggerTime() > targetSimTime) break;
@@ -76,7 +83,7 @@ public class SimulationEngine implements InitializingBean {
 
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
-                if (sameTimeEventCount > MAX_EVENTS_PER_TIMESTAMP) {
+                if (sameTimeEventCount > maxEventsPerTimestamp) {
                     log.error("仿真异常: 时间戳 {} 发生死循环，强制熔断", lastProcessedTime);
                     break;
                 }
@@ -86,6 +93,16 @@ public class SimulationEngine implements InitializingBean {
             }
 
             context.setSimTime(nextEvent.getTriggerTime());
+
+            // 记录事件日志（在执行前记录当前上下文）
+            EventLogEntryDto logEntry = new EventLogEntryDto();
+            logEntry.setSimTime(nextEvent.getTriggerTime());
+            logEntry.setType(nextEvent.getType());
+            logEntry.setEventId(nextEvent.getEventId());
+            logEntry.setParentEventId(nextEvent.getParentEventId());
+            logEntry.setSubjects(nextEvent.getSubjects());
+            eventLog.append(logEntry);
+
             EventHandler handler = handlerMap.get(nextEvent.getType());
             if (handler != null) {
                 try {
@@ -230,7 +247,9 @@ public class SimulationEngine implements InitializingBean {
 
             Point truckPos = new Point(truck.getPosX(), truck.getPosY());
             Point stationPos = new Point(station.getPosX(), station.getPosY());
-            if (GisUtil.getDistance(truckPos, stationPos) > CHARGE_ALIGN_THRESHOLD) {
+            // 使用 GlobalContext 中注入的 PhysicsConfig，避免在静态内部类中直接访问外部非静态字段
+            double alignThreshold = context.getPhysicsConfig().getChargeAlignThreshold();
+            if (GisUtil.getDistance(truckPos, stationPos) > alignThreshold) {
                 throw new BusinessException("充电失败: 设备未对准充电桩");
             }
 

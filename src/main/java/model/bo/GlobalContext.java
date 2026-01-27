@@ -1,8 +1,10 @@
 package model.bo;
 
+import common.config.PhysicsConfig;
 import lombok.Getter;
 import lombok.Setter;
 import model.entity.*;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -42,6 +44,10 @@ public class GlobalContext {
     private final Map<String, WorkInstruction> workInstructionMap = new ConcurrentHashMap<>();
     // 存储港口内所有的集装箱
     private final Map<String, Container> containerMap = new ConcurrentHashMap<>();
+
+    //  物理与数值配置（由 Spring 容器注入后通过静态方法设置）
+    @Setter
+    private PhysicsConfig physicsConfig;
 
     // 私有化构造函数，防止外部直接 new 对象
     private GlobalContext() {}
