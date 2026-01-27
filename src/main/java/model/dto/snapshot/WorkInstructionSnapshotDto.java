@@ -8,11 +8,11 @@ import lombok.Data;
  */
 @Data
 public class WorkInstructionSnapshotDto {
-    private String wiRefNo;
-    private String containerId;
-    private BizTypeEnum moveKind;
-    private String fromPos;
-    private String toPos;
-    private String wiStatus;
-    private String dispatchCheId;
+    private String wiRefNo;  // 作业号
+    private String containerId;  // 货物id
+    private BizTypeEnum moveKind;  // 作业类型
+    private String fromPos;  // 起始位置
+    private String toPos;  // 终点位置
+    private String wiStatus;  // 当前状态
+    private String dispatchCheId;  // 执行设备id
 }

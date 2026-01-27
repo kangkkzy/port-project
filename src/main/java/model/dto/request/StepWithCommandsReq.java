@@ -5,7 +5,6 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * 高层 step API 请求：
  * 在一个仿真时间步内批量下发命令并推进时间。
  */
 @Data

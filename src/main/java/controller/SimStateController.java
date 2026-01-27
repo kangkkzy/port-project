@@ -8,17 +8,20 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 仿真状态查询接口
+ */
 @RestController
 @RequestMapping("/sim/state")
 public class SimStateController {
 
     /**
-     * 兼容旧接口：直接返回内部 GlobalContext。
-     * 建议新接入方优先使用 /snapshot。
+     * 调试用所有接口
      */
     @GetMapping("/all")
     public Result getAllState() {
@@ -26,7 +29,7 @@ public class SimStateController {
     }
 
     /**
-     * 推荐接口：返回解耦后的仿真世界快照 DTO
+     * 获取当前仿真帧的完整快照
      */
     @GetMapping("/snapshot")
     public Result getSnapshot() {
@@ -34,39 +37,56 @@ public class SimStateController {
         PortSnapshotDto snapshot = new PortSnapshotDto();
         snapshot.setSimTime(ctx.getSimTime());
 
-        // 设备快照
+        // 组装各类实体的快照数据
         snapshot.setDevices(buildDeviceSnapshots(ctx));
-        // 栅栏
         snapshot.setFences(buildFenceSnapshots(ctx));
-        // 充电桩
         snapshot.setChargingStations(buildChargingStationSnapshots(ctx));
-        // 作业指令
         snapshot.setWorkInstructions(buildWiSnapshots(ctx));
 
         return Result.success("查询成功", snapshot);
     }
 
+    /**
+     * 构建所有设备的快照
+     */
     private List<DeviceSnapshotDto> buildDeviceSnapshots(GlobalContext ctx) {
-        Map<String, Truck> trucks = ctx.getTruckMap();
-        Map<String, QcDevice> qcs = ctx.getQcMap();
-        Map<String, AscDevice> ascs = ctx.getAscMap();
+        List<DeviceSnapshotDto> allDevices = new ArrayList<>();
 
-        return
-                // 集卡
-                trucks.values().stream().map(t -> {
-                    DeviceSnapshotDto dto = new DeviceSnapshotDto();
-                    dto.setId(t.getId());
-                    dto.setType(t.getType());
-                    dto.setState(t.getState());
-                    dto.setPosX(t.getPosX());
-                    dto.setPosY(t.getPosY());
-                    dto.setPowerLevel(t.getPowerLevel());
-                    dto.setNeedCharge(t.isNeedCharge());
-                    dto.setCurrWiRefNo(t.getCurrWiRefNo());
-                    return dto;
-                }).collect(Collectors.toList())
-                // 简化：目前只把 Truck 暴露给外部算法，如需 ASC/QC 也暴露，可以在此处追加映射。
-                ;
+        //  集卡 (Truck)
+        allDevices.addAll(mapToSnapshot(ctx.getTruckMap().values()));
+
+        //  岸桥 (QC)
+        allDevices.addAll(mapToSnapshot(ctx.getQcMap().values()));
+
+        //  龙门吊 (ASC)
+        allDevices.addAll(mapToSnapshot(ctx.getAscMap().values()));
+
+        return allDevices;
+    }
+
+    /**
+     * 通用设备映射逻辑
+     */
+    private List<DeviceSnapshotDto> mapToSnapshot(Collection<? extends BaseDevice> devices) {
+        return devices.stream().map(device -> {
+            DeviceSnapshotDto dto = new DeviceSnapshotDto();
+
+            // 基础属性 所有设备有
+            dto.setId(device.getId());
+            dto.setType(device.getType());
+            dto.setState(device.getState());
+            dto.setPosX(device.getPosX());
+            dto.setPosY(device.getPosY());
+            dto.setCurrWiRefNo(device.getCurrWiRefNo());
+
+            //  特有属性 (仅集卡
+            if (device instanceof Truck truck) {
+                dto.setPowerLevel(truck.getPowerLevel());
+                dto.setNeedCharge(truck.isNeedCharge());
+            }
+
+            return dto;
+        }).collect(Collectors.toList());
     }
 
     private List<FenceSnapshotDto> buildFenceSnapshots(GlobalContext ctx) {
@@ -74,10 +94,12 @@ public class SimStateController {
             FenceSnapshotDto dto = new FenceSnapshotDto();
             dto.setNodeId(f.getNodeId());
             dto.setBlockCode(f.getBlockCode());
+            // 静态属性
             dto.setPosX(f.getPosX());
             dto.setPosY(f.getPosY());
             dto.setRadius(f.getRadius());
             dto.setSpeedLimit(f.getSpeedLimit());
+            // 动态状态 (是否阻塞 + 等待队列)
             dto.setStatus(f.getStatus());
             dto.setWaitingTrucks(f.getWaitingTrucks());
             return dto;
@@ -91,6 +113,7 @@ public class SimStateController {
             dto.setStatus(s.getStatus());
             dto.setPosX(s.getPosX());
             dto.setPosY(s.getPosY());
+            // 占用情况
             dto.setTruckId(s.getTruckId());
             dto.setChargeRate(s.getChargeRate());
             return dto;
@@ -103,6 +126,7 @@ public class SimStateController {
             dto.setWiRefNo(wi.getWiRefNo());
             dto.setContainerId(wi.getContainerId());
             dto.setMoveKind(wi.getMoveKind());
+            // 起止点与状态流转
             dto.setFromPos(wi.getFromPos());
             dto.setToPos(wi.getToPos());
             dto.setWiStatus(wi.getWiStatus());

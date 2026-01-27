@@ -5,7 +5,7 @@ import model.bo.GlobalContext;
 
 /**
  * 事件处理器扩展点
- * 新增事件类型时只需新增实现类，无需修改 SimulationEngine 本身。
+ * 新增事件类型时只需新增实现类 无需修改 SimulationEngine 本身。
  */
 public interface SimEventHandler {
 

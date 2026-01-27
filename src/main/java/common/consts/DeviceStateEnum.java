@@ -5,7 +5,6 @@ import lombok.Getter;
 
 /**
  * 设备状态枚举
- * 对应《字段设计 状态设计.pdf》中对实体状态的定义
  */
 @Getter
 @AllArgsConstructor

@@ -5,8 +5,7 @@ import common.consts.DeviceTypeEnum;
 import lombok.Data;
 
 /**
- * 对外暴露的设备状态快照 DTO
- * 避免直接依赖内部实体，实现接口层与领域模型解耦。
+ * 设备状态快照
  */
 @Data
 public class DeviceSnapshotDto {

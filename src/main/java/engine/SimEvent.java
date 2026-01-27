@@ -18,9 +18,9 @@ public class SimEvent implements Comparable<SimEvent> {
     // 多主体参与 如 {"TRUCK": "T001", "CRANE": "QC01", "FENCE": "F01"}
     private Map<String, String> subjects;
 
-    private Object data;            // 事件负载 (如 目标坐标点/状态枚举)
-    private boolean cancelled;      // 是否被取消 (用于打断充电等场景)
-    private long creationSequence;  // 创建序号 (用于解决同秒并发事件)
+    private Object data;            // 事件负载
+    private boolean cancelled;      // 是否被取消
+    private long creationSequence;  // 创建序号
 
     // 计数器 解决同一毫秒内的事件排序
     private static final AtomicLong sequenceGenerator = new AtomicLong(0);
@@ -45,7 +45,7 @@ public class SimEvent implements Comparable<SimEvent> {
     }
 
     /**
-     * 获取指定角色的主体ID
+     *  指定的ID
      */
     public String getPrimarySubject(String role) {
         return subjects.get(role);

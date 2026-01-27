@@ -9,7 +9,7 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * 简单的内存事件日志（最近 N 条）
+ * 简单的内存事件日志
  */
 @Component
 public class SimulationEventLog {

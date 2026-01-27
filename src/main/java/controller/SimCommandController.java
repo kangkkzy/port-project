@@ -66,11 +66,11 @@ public class SimCommandController {
     }
 
     /**
-     * 高层接口：在一个时间步内批量下发指令并推进时间，返回新的状态快照
+     * 批量接收这一帧所有的控制指令 并推进时间 返回新的状态快照
      */
     @PostMapping("/stepWithCommands")
     public Result stepWithCommands(@RequestBody StepWithCommandsReq req) {
-        // 1. 批量下发指令（完全透传到 ExternalAlgorithmApi）
+        //  批量下发指令
         if (req.getTruckMoves() != null) {
             req.getTruckMoves().forEach(algorithmApi::moveDevice);
         }
@@ -87,10 +87,10 @@ public class SimCommandController {
             req.getChargeCommands().forEach(algorithmApi::chargeTruck);
         }
 
-        // 2. 推进时间
+        //  推进时间
         algorithmApi.stepTime(req.getStepMS());
 
-        // 3. 返回当前快照（直接复用 SimStateController 的装配逻辑风格）
+        //  返回当前快照
         GlobalContext ctx = GlobalContext.getInstance();
         PortSnapshotDto snapshot = new PortSnapshotDto();
         snapshot.setSimTime(ctx.getSimTime());

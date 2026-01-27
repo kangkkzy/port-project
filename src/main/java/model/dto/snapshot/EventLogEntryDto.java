@@ -11,7 +11,7 @@ import java.util.Map;
 @Data
 public class EventLogEntryDto {
     /**
-     * 事件触发时间（仿真时间戳，毫秒）
+     * 事件触发时间
      */
     private long simTime;
 
@@ -21,12 +21,12 @@ public class EventLogEntryDto {
     private EventTypeEnum type;
 
     /**
-     * 事件唯一ID
+     * 事件ID
      */
     private String eventId;
 
     /**
-     * 父事件ID（可选，用于构建因果链）
+     * 父事件ID
      */
     private String parentEventId;
 

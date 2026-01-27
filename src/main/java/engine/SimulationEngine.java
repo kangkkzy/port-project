@@ -29,7 +29,7 @@ import service.algorithm.impl.SimulationEventLog;
 @Slf4j
 @RequiredArgsConstructor
 public class SimulationEngine implements InitializingBean {
-
+// 数据注入
     private final PhysicsConfig physicsConfig;
     private final SimulationEventLog eventLog;
     private final GlobalContext context = GlobalContext.getInstance();
@@ -39,18 +39,18 @@ public class SimulationEngine implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
-        // 通过 Spring 注入的处理器列表进行注册，符合开闭原则
+        // 通过 Spring 注入的处理器列表进行注册
         for (SimEventHandler handler : handlerBeans) {
             handlerMap.put(handler.getType(), handler);
         }
     }
-
+// 注入新事件
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
         eventQueue.add(event);
         return event;
     }
-
+// 时间
     public void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
@@ -77,7 +77,7 @@ public class SimulationEngine implements InitializingBean {
 
             context.setSimTime(nextEvent.getTriggerTime());
 
-            // 记录事件日志（在执行前记录当前上下文）
+            // 记录事件日志
             EventLogEntryDto logEntry = new EventLogEntryDto();
             logEntry.setSimTime(nextEvent.getTriggerTime());
             logEntry.setType(nextEvent.getType());
@@ -98,11 +98,9 @@ public class SimulationEngine implements InitializingBean {
         context.setSimTime(targetSimTime);
     }
 
-    // --- 处理器实现 ---
-
     /**
-     * [重点修改] 栅栏控制处理器
-     * 逻辑：仅更新状态。如果是开启操作，清空等待列表（数据维护），但不发送任何唤醒事件。
+     *  栅栏控制处理器
+     * 仅更新状态 如果是开启操作 清空等待列表（数据维护） 但不发送任何唤醒事件
      */
     @org.springframework.stereotype.Component
     public static class FenceControlHandler implements SimEventHandler {
@@ -120,9 +118,7 @@ public class SimulationEngine implements InitializingBean {
                 FenceStateEnum status = (FenceStateEnum) event.getData();
                 fence.setStatus(status.getCode());
 
-                // 状态维护：如果栅栏变更为通行，物理上不再阻挡任何车辆。
-                // 清空列表是为了保持状态数据的一致性 (SimStateController获取的数据更准确)。
-                // 注意：这里没有 scheduleEvent(MOVE_START)，唤醒完全依赖外部算法。
+                // 如果栅栏变更为通行 物理上不再阻挡任何车辆
                 if (FenceStateEnum.PASSABLE.equals(status)) {
                     fence.getWaitingTrucks().clear();
                 }
@@ -131,9 +127,7 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
-
-    // --- 以下处理器保持之前的无逻辑/纯执行状态 ---
-
+    // 任务下发确认
     @org.springframework.stereotype.Component
     public static class CmdAssignTaskHandler implements SimEventHandler {
 
@@ -154,7 +148,6 @@ public class SimulationEngine implements InitializingBean {
             ackEvent.addSubject("DEVICE", deviceId);
         }
     }
-
     @org.springframework.stereotype.Component
     public static class CmdTaskAckHandler implements SimEventHandler {
 
@@ -176,7 +169,6 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
-
     @org.springframework.stereotype.Component
     public static class CmdMoveHandler implements SimEventHandler {
 
@@ -202,7 +194,7 @@ public class SimulationEngine implements InitializingBean {
             moveStart.addSubject("TRUCK", truckId);
         }
     }
-
+// 到达目的地
     @org.springframework.stereotype.Component
     public static class MoveStartHandler implements SimEventHandler {
 
@@ -216,14 +208,11 @@ public class SimulationEngine implements InitializingBean {
             String deviceId = event.getPrimarySubject("TRUCK");
             if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
             BaseDevice device = context.getDevice(deviceId);
-            // BaseDevice.onMoveStart 会检测 Fence 状态。
-            // 若 Fence 为 BLOCKED，device 状态变为 WAITING 并停止，等待外部再次发送 CMD_MOVE。
             if (device != null) {
                 device.onMoveStart(context.getSimTime(), engine, event.getEventId());
             }
         }
     }
-
     @org.springframework.stereotype.Component
     public static class ArrivalHandler implements SimEventHandler {
 
@@ -244,7 +233,6 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
-
     @org.springframework.stereotype.Component
     public static class ReportIdleHandler implements SimEventHandler {
 
@@ -282,7 +270,6 @@ public class SimulationEngine implements InitializingBean {
 
             Point truckPos = new Point(truck.getPosX(), truck.getPosY());
             Point stationPos = new Point(station.getPosX(), station.getPosY());
-            // 使用 GlobalContext 中注入的 PhysicsConfig，避免在静态内部类中直接访问外部非静态字段
             double alignThreshold = context.getPhysicsConfig().getChargeAlignThreshold();
             if (GisUtil.getDistance(truckPos, stationPos) > alignThreshold) {
                 throw new BusinessException("充电失败: 设备未对准充电桩");
@@ -296,7 +283,6 @@ public class SimulationEngine implements InitializingBean {
             chargeStart.addSubject("STATION", stationId);
         }
     }
-
     @org.springframework.stereotype.Component
     public static class ChargingStartHandler implements SimEventHandler {
 

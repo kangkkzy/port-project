@@ -14,7 +14,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Getter
 public class GlobalContext {
 
-    // volatile保证多线程环境下的可见性与禁止指令重排序 确保单例的安全
     private static volatile GlobalContext instance;
 
     // 仿真世界的绝对时间戳 (单位：毫秒)
@@ -45,15 +44,15 @@ public class GlobalContext {
     // 存储港口内所有的集装箱
     private final Map<String, Container> containerMap = new ConcurrentHashMap<>();
 
-    //  物理与数值配置（由 Spring 容器注入后通过静态方法设置）
+    //  物理与数值配置
     @Setter
     private PhysicsConfig physicsConfig;
 
-    // 私有化构造函数，防止外部直接 new 对象
+    // 防止外部直接 new 对象
     private GlobalContext() {}
 
     /**
-     * 获取全局上下文单例 (双重检查锁实现)
+     * 获取全局上下文单例
      */
     public static GlobalContext getInstance() {
         if (instance == null) {
@@ -67,7 +66,7 @@ public class GlobalContext {
     }
 
     /**
-     * 多态查询辅助方法：根据设备ID获取具体的设备基类
+     * 根据设备ID获取具体的设备基类
      */
     public BaseDevice getDevice(String deviceId) {
         if (truckMap.containsKey(deviceId)) return truckMap.get(deviceId);

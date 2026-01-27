@@ -13,7 +13,6 @@ import service.algorithm.TaskDecisionService;
 
 /**
  * 任务决策服务
- * 职责：仅做基础校验，生成响应对象。
  */
 @Service
 public class TaskDecisionServiceImpl implements TaskDecisionService {
@@ -24,7 +23,7 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
     public AssignTaskResp evaluateAndDecide(AssignTaskReq req) {
         BaseDevice device = null;
 
-        // 1. 根据具体类型查找设备
+        //  根据具体类型查找设备
         // 油集卡和电集卡都存储在 truckMap 中
         if (DeviceTypeEnum.ELECTRIC_TRUCK.equals(req.getDeviceType()) || DeviceTypeEnum.OIL_TRUCK.equals(req.getDeviceType())) {
             device = context.getTruckMap().get(req.getDeviceId());
@@ -33,7 +32,7 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
         } else if (DeviceTypeEnum.QC.equals(req.getDeviceType())) {
             device = context.getQcMap().get(req.getDeviceId());
         } else {
-            // 兜底或报错
+            //  报错
             if (req.getDeviceType() == null) throw new BusinessException("设备类型不能为空");
             device = context.getDevice(req.getDeviceId());
         }
@@ -42,13 +41,13 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
             throw new BusinessException(ErrorCodes.DEVICE_NOT_FOUND);
         }
 
-        // 2. 验证工单
+        // 验证工单
         WorkInstruction wi = context.getWorkInstructionMap().get(req.getWiRefNo());
         if (wi == null) {
             throw new BusinessException("指定的作业指令 [" + req.getWiRefNo() + "] 不存在");
         }
 
-        // 3. 生成响应 (Response)
+        //  生成响应
         AssignTaskResp resp = new AssignTaskResp();
         resp.setTruckId(req.getDeviceId());
         resp.setAssignedWiRefNo(req.getWiRefNo());

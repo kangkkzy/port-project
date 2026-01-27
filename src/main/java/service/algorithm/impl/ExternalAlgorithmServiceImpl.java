@@ -24,7 +24,6 @@ import java.util.Map;
 
 /**
  * 外部算法 API 实现
- * 职责：仅做参数校验与事件转发，绝不补充默认值。
  */
 @Service
 public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
@@ -43,21 +42,21 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
     @Override
     public Result moveDevice(MoveCommandReq req) {
         synchronized (context) {
-            // 1. 校验设备存在
+            //  校验设备存在
             BaseDevice device = context.getDevice(req.getTruckId());
             if (device == null) throw new BusinessException(ErrorCodes.DEVICE_NOT_FOUND);
 
-            // 2. [严格校验] 速度必须由外部指定
+            //  速度必须由外部指定
             if (req.getSpeed() == null || req.getSpeed() <= 0) {
                 throw new BusinessException("移动指令错误: 必须明确指定移动速度 (speed)，且值必须大于0");
             }
 
-            // 3. [严格校验] 目标点必须由外部指定
+            //  目标点必须由外部指定
             if (req.getTargetPoint() == null) {
                 throw new BusinessException("移动指令错误: 必须明确指定目标坐标 (targetPoint)");
             }
 
-            // 4. 构造事件负载 (纯透传)
+            //  构造事件负载
             Map<String, Object> payload = new HashMap<>();
             payload.put("target", req.getTargetPoint());
             payload.put("speed", req.getSpeed());
@@ -74,7 +73,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             BaseDevice device = context.getDevice(req.getCraneId());
             if (device == null) throw new BusinessException(ErrorCodes.DEVICE_NOT_FOUND);
 
-            // [严格校验] 速度必须由外部指定
+            //  速度必须由外部指定
             if (req.getSpeed() == null || req.getSpeed() <= 0) {
                 throw new BusinessException("起重机移动指令错误: 必须明确指定速度 (speed)");
             }
@@ -85,7 +84,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("req", req);
-            // 直接使用外部传入的速度，不查配置
+            // 直接使用外部传入的速度
             payload.put("speed", req.getSpeed());
 
             SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_CRANE_MOVE, payload);
