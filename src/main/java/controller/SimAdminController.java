@@ -22,8 +22,10 @@ public class SimAdminController {
      */
     @PostMapping("/reset")
     public Result reset() {
-        GlobalContext.getInstance().clearAll();
-        return Result.success("重置成功");
+        synchronized (GlobalContext.getInstance()) {
+            GlobalContext.getInstance().clearAll();
+            return Result.success("重置成功");
+        }
     }
 
     /**
@@ -33,35 +35,37 @@ public class SimAdminController {
      */
     @PostMapping("/load")
     public Result load(@RequestBody ScenarioLoadRequest req) {
-        GlobalContext ctx = GlobalContext.getInstance();
-        ctx.clearAll();
+        synchronized (GlobalContext.getInstance()) {
+            GlobalContext ctx = GlobalContext.getInstance();
+            ctx.clearAll();
 
-        if (req.getTrucks() != null) {
-            req.getTrucks().forEach(t -> ctx.getTruckMap().put(t.getId(), t));
-        }
-        if (req.getQcDevices() != null) {
-            req.getQcDevices().forEach(q -> ctx.getQcMap().put(q.getId(), q));
-        }
-        if (req.getAscDevices() != null) {
-            req.getAscDevices().forEach(a -> ctx.getAscMap().put(a.getId(), a));
-        }
-        if (req.getFences() != null) {
-            req.getFences().forEach(f -> ctx.getFenceMap().put(f.getNodeId(), f));
-        }
-        if (req.getChargingStations() != null) {
-            req.getChargingStations().forEach(s -> ctx.getChargingStationMap().put(s.getStationCode(), s));
-        }
-        if (req.getYardBlocks() != null) {
-            req.getYardBlocks().forEach(b -> ctx.getYardBlockMap().put(b.getBlockCode(), b));
-        }
-        if (req.getWorkInstructions() != null) {
-            req.getWorkInstructions().forEach(w -> ctx.getWorkInstructionMap().put(w.getWiRefNo(), w));
-        }
-        if (req.getContainers() != null) {
-            req.getContainers().forEach(c -> ctx.getContainerMap().put(c.getContainerId(), c));
-        }
+            if (req.getTrucks() != null) {
+                req.getTrucks().forEach(t -> ctx.getTruckMap().put(t.getId(), t));
+            }
+            if (req.getQcDevices() != null) {
+                req.getQcDevices().forEach(q -> ctx.getQcMap().put(q.getId(), q));
+            }
+            if (req.getAscDevices() != null) {
+                req.getAscDevices().forEach(a -> ctx.getAscMap().put(a.getId(), a));
+            }
+            if (req.getFences() != null) {
+                req.getFences().forEach(f -> ctx.getFenceMap().put(f.getNodeId(), f));
+            }
+            if (req.getChargingStations() != null) {
+                req.getChargingStations().forEach(s -> ctx.getChargingStationMap().put(s.getStationCode(), s));
+            }
+            if (req.getYardBlocks() != null) {
+                req.getYardBlocks().forEach(b -> ctx.getYardBlockMap().put(b.getBlockCode(), b));
+            }
+            if (req.getWorkInstructions() != null) {
+                req.getWorkInstructions().forEach(w -> ctx.getWorkInstructionMap().put(w.getWiRefNo(), w));
+            }
+            if (req.getContainers() != null) {
+                req.getContainers().forEach(c -> ctx.getContainerMap().put(c.getContainerId(), c));
+            }
 
-        return Result.success("场景装载成功");
+            return Result.success("场景装载成功");
+        }
     }
 
     /**

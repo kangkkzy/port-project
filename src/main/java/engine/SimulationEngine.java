@@ -19,6 +19,7 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Component;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.PriorityBlockingQueue;
 
@@ -33,33 +34,15 @@ public class SimulationEngine implements InitializingBean {
     private final SimulationEventLog eventLog;
     private final GlobalContext context = GlobalContext.getInstance();
     private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
-    private final Map<EventTypeEnum, EventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
+    private final Map<EventTypeEnum, SimEventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
+    private final List<SimEventHandler> handlerBeans;
 
     @Override
     public void afterPropertiesSet() {
-        // 注册外部指令处理器
-        register(EventTypeEnum.CMD_MOVE, new CmdMoveHandler());
-        register(EventTypeEnum.CMD_CHARGE, new CmdChargeHandler());
-        register(EventTypeEnum.CMD_FENCE_TOGGLE, new CmdFenceHandler()); // [重点修改]
-        register(EventTypeEnum.CMD_CRANE_MOVE, new CmdCraneMoveHandler());
-        register(EventTypeEnum.CMD_CRANE_OP, new CmdCraneOpHandler());
-        register(EventTypeEnum.CMD_ASSIGN_TASK, new CmdAssignTaskHandler());
-        register(EventTypeEnum.CMD_TASK_ACK, new CmdTaskAckHandler());
-
-        // 注册内部物理事件处理器
-        register(EventTypeEnum.MOVE_START, new MoveStartHandler());
-        register(EventTypeEnum.ARRIVAL, new ArrivalHandler());
-        register(EventTypeEnum.CHARGING_START, new ChargingStartHandler());
-        register(EventTypeEnum.CHARGE_FULL, new ChargeFullHandler());
-        register(EventTypeEnum.REPORT_IDLE, new ReportIdleHandler());
-        register(EventTypeEnum.FETCH_DONE, new FetchDoneHandler());
-        register(EventTypeEnum.PUT_DONE, new PutDoneHandler());
-        register(EventTypeEnum.WI_COMPLETE, new WiCompleteHandler());
-        register(EventTypeEnum.FENCE_CONTROL, new FenceControlHandler()); // [重点修改]
-    }
-
-    private void register(EventTypeEnum type, EventHandler handler) {
-        handlerMap.put(type, handler);
+        // 通过 Spring 注入的处理器列表进行注册，符合开闭原则
+        for (SimEventHandler handler : handlerBeans) {
+            handlerMap.put(handler.getType(), handler);
+        }
     }
 
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
@@ -103,7 +86,7 @@ public class SimulationEngine implements InitializingBean {
             logEntry.setSubjects(nextEvent.getSubjects());
             eventLog.append(logEntry);
 
-            EventHandler handler = handlerMap.get(nextEvent.getType());
+            SimEventHandler handler = handlerMap.get(nextEvent.getType());
             if (handler != null) {
                 try {
                     handler.handle(nextEvent, this, context);
@@ -115,17 +98,20 @@ public class SimulationEngine implements InitializingBean {
         context.setSimTime(targetSimTime);
     }
 
-    interface EventHandler {
-        void handle(SimEvent event, SimulationEngine engine, GlobalContext context);
-    }
-
     // --- 处理器实现 ---
 
     /**
      * [重点修改] 栅栏控制处理器
      * 逻辑：仅更新状态。如果是开启操作，清空等待列表（数据维护），但不发送任何唤醒事件。
      */
-    static class FenceControlHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class FenceControlHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.FENCE_CONTROL;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String fenceId = event.getPrimarySubject("FENCE");
@@ -148,7 +134,14 @@ public class SimulationEngine implements InitializingBean {
 
     // --- 以下处理器保持之前的无逻辑/纯执行状态 ---
 
-    static class CmdAssignTaskHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdAssignTaskHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_ASSIGN_TASK;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -162,7 +155,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdTaskAckHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdTaskAckHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_TASK_ACK;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -177,7 +177,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdMoveHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdMoveHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_MOVE;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -196,7 +203,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class MoveStartHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class MoveStartHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.MOVE_START;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String deviceId = event.getPrimarySubject("TRUCK");
@@ -210,7 +224,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class ArrivalHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class ArrivalHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.ARRIVAL;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
@@ -224,7 +245,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class ReportIdleHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class ReportIdleHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.REPORT_IDLE;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
@@ -233,7 +261,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdChargeHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdChargeHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_CHARGE;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -262,7 +297,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class ChargingStartHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class ChargingStartHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CHARGING_START;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String truckId = event.getPrimarySubject("TRUCK");
@@ -281,7 +323,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class ChargeFullHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class ChargeFullHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CHARGE_FULL;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String truckId = event.getPrimarySubject("TRUCK");
@@ -303,7 +352,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdFenceHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdFenceHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_FENCE_TOGGLE;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String fenceId = event.getPrimarySubject("FENCE");
@@ -316,7 +372,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdCraneMoveHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdCraneMoveHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_CRANE_MOVE;
+        }
+
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -334,7 +397,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class CmdCraneOpHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class CmdCraneOpHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.CMD_CRANE_OP;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             CraneOperationReq req = (CraneOperationReq) event.getData();
@@ -343,13 +413,27 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class FetchDoneHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class FetchDoneHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.FETCH_DONE;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
         }
     }
 
-    static class PutDoneHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class PutDoneHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.PUT_DONE;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String deviceId = event.getPrimarySubject("CRANE");
@@ -365,7 +449,14 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    static class WiCompleteHandler implements EventHandler {
+    @org.springframework.stereotype.Component
+    public static class WiCompleteHandler implements SimEventHandler {
+
+        @Override
+        public EventTypeEnum getType() {
+            return EventTypeEnum.WI_COMPLETE;
+        }
+
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String wiRefNo = event.getPrimarySubject("WI");
