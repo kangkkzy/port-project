@@ -39,6 +39,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         this.taskDecisionService = taskDecisionService;
     }
 
+    /**
+     * 下发集卡移动指令
+     */
     @Override
     public Result moveDevice(MoveCommandReq req) {
         synchronized (context) {
@@ -67,6 +70,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    /**
+     * 下发 岸桥/龙门吊 移动指令
+     */
     @Override
     public Result moveCrane(CraneMoveReq req) {
         synchronized (context) {
@@ -93,6 +99,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    /**
+     * 下发任务指派指令
+     */
     @Override
     public AssignTaskResp assignTask(AssignTaskReq req) {
         synchronized (context) {
@@ -108,6 +117,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    /**
+     * 控制交通栅栏状态
+     */
     @Override
     public Result toggleFence(FenceControlReq req) {
         synchronized (context) {
@@ -120,6 +132,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    /**
+     * 控制起重机执行具体作业（抓/放）
+     */
     @Override
     public Result operateCrane(CraneOperationReq req) {
         synchronized (context) {
@@ -136,6 +151,9 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    /**
+     * 触发集卡充电流程
+     */
     @Override
     public Result chargeTruck(ChargeCommandReq req) {
         synchronized (context) {
@@ -164,6 +182,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
+    // 推进仿真的时间
     @Override
     public void stepTime(long stepMS) {
         synchronized (context) {

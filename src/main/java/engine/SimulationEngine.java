@@ -127,7 +127,9 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
-    // 任务下发确认
+    /**
+     * 任务指派处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdAssignTaskHandler implements SimEventHandler {
 
@@ -148,6 +150,9 @@ public class SimulationEngine implements InitializingBean {
             ackEvent.addSubject("DEVICE", deviceId);
         }
     }
+    /**
+     * 任务确认处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdTaskAckHandler implements SimEventHandler {
 
@@ -169,6 +174,9 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+    /**
+     * 移动指令处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdMoveHandler implements SimEventHandler {
 
@@ -194,7 +202,9 @@ public class SimulationEngine implements InitializingBean {
             moveStart.addSubject("TRUCK", truckId);
         }
     }
-// 到达目的地
+    /**
+     * 开始移动处理
+     */
     @org.springframework.stereotype.Component
     public static class MoveStartHandler implements SimEventHandler {
 
@@ -213,6 +223,9 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+    /**
+     * 到达处理
+     */
     @org.springframework.stereotype.Component
     public static class ArrivalHandler implements SimEventHandler {
 
@@ -233,6 +246,9 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+    /**
+     * 空闲上报处理  记录日志
+     */
     @org.springframework.stereotype.Component
     public static class ReportIdleHandler implements SimEventHandler {
 
@@ -248,7 +264,9 @@ public class SimulationEngine implements InitializingBean {
             log.info("设备 {} 动作结束，当前空闲", id);
         }
     }
-
+    /**
+     * 充电指令处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdChargeHandler implements SimEventHandler {
 
@@ -283,6 +301,9 @@ public class SimulationEngine implements InitializingBean {
             chargeStart.addSubject("STATION", stationId);
         }
     }
+    /**
+     * 充电开始处理
+     */
     @org.springframework.stereotype.Component
     public static class ChargingStartHandler implements SimEventHandler {
 
@@ -308,7 +329,9 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
-
+    /**
+     * 充电完成处理
+     */
     @org.springframework.stereotype.Component
     public static class ChargeFullHandler implements SimEventHandler {
 
@@ -338,6 +361,9 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
+    /**
+     * 栅栏指令转换处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdFenceHandler implements SimEventHandler {
 
@@ -358,6 +384,9 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
+    /**
+     * 桥吊/龙门吊 移动指令处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdCraneMoveHandler implements SimEventHandler {
 
@@ -383,6 +412,9 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
+    /**
+     * 桥吊/龙门吊 操作处理
+     */
     @org.springframework.stereotype.Component
     public static class CmdCraneOpHandler implements SimEventHandler {
 
@@ -399,6 +431,7 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
+    // 抓箱完成处理
     @org.springframework.stereotype.Component
     public static class FetchDoneHandler implements SimEventHandler {
 
@@ -409,9 +442,39 @@ public class SimulationEngine implements InitializingBean {
 
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
+            //  获取执行抓箱的设备
+            String deviceId = event.getPrimarySubject("CRANE");
+            BaseDevice device = context.getDevice(deviceId);
+
+            if (device != null) {
+                //  获取当前绑定的作业指令
+                String wiRefNo = device.getCurrWiRefNo();
+                WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
+
+                if (wi != null && wi.getContainerId() != null) {
+                    //  获取对应的集装箱
+                    Container container = context.getContainerMap().get(wi.getContainerId());
+
+                    if (container != null) {
+                        //  更新箱子位置为当前设备ID 随着设备移动
+                        String oldPos = container.getCurrentPos();
+                        container.setCurrentPos(device.getId());
+
+                        log.info("事件[FETCH_DONE]: 设备 [{}] 完成抓箱。集装箱 [{}] 位置已从 [{}] 更新为设备上的 [{}]",
+                                deviceId, container.getContainerId(), oldPos, device.getId());
+                    } else {
+                        log.warn("事件[FETCH_DONE]: 指令 [{}] 引用的集装箱 [{}] 在系统中未找到", wiRefNo, wi.getContainerId());
+                    }
+                } else {
+                    log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但未绑定有效指令或指令无箱号", deviceId);
+                }
+            }
         }
     }
 
+    /**
+     * 放箱完成处理 作业完成处理
+     */
     @org.springframework.stereotype.Component
     public static class PutDoneHandler implements SimEventHandler {
 
@@ -435,6 +498,9 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
+    /**
+     * 指令完成处理
+     */
     @org.springframework.stereotype.Component
     public static class WiCompleteHandler implements SimEventHandler {
 
