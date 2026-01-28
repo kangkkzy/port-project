@@ -192,4 +192,22 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             engine.runUntil(context.getSimTime() + stepMS);
         }
     }
+
+    /**
+     * 取消指定事件
+     */
+    @Override
+    public Result cancelEvent(String eventId) {
+        synchronized (context) {
+            if (eventId == null || eventId.trim().isEmpty()) {
+                throw new BusinessException("事件ID不能为空");
+            }
+            boolean cancelled = engine.cancelEvent(eventId);
+            if (cancelled) {
+                return Result.success("事件已取消");
+            } else {
+                return Result.error("事件不存在或已被处理");
+            }
+        }
+    }
 }

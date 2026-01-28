@@ -89,6 +89,7 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    // 栅栏的快照
     private List<FenceSnapshotDto> buildFenceSnapshots(GlobalContext ctx) {
         return ctx.getFenceMap().values().stream().map(f -> {
             FenceSnapshotDto dto = new FenceSnapshotDto();
@@ -106,6 +107,7 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    // 充电桩快照
     private List<ChargingStationSnapshotDto> buildChargingStationSnapshots(GlobalContext ctx) {
         return ctx.getChargingStationMap().values().stream().map(s -> {
             ChargingStationSnapshotDto dto = new ChargingStationSnapshotDto();
@@ -120,6 +122,7 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    // 作业指令快照
     private List<WorkInstructionSnapshotDto> buildWiSnapshots(GlobalContext ctx) {
         return ctx.getWorkInstructionMap().values().stream().map(wi -> {
             WorkInstructionSnapshotDto dto = new WorkInstructionSnapshotDto();

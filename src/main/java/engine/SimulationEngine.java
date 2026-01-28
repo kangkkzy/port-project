@@ -7,6 +7,7 @@ import common.consts.EventTypeEnum;
 import common.consts.FenceStateEnum;
 import common.consts.WiStatusEnum;
 import common.exception.BusinessException;
+import common.exception.SimulationDeadLoopException;
 import common.util.GisUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,21 +22,28 @@ import org.springframework.stereotype.Component;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
 
 import service.algorithm.impl.SimulationEventLog;
+import service.algorithm.impl.SimulationErrorLog;
 
 @Component
 @Slf4j
 @RequiredArgsConstructor
 public class SimulationEngine implements InitializingBean {
-// 数据注入
+    // 数据注入
     private final PhysicsConfig physicsConfig;
     private final SimulationEventLog eventLog;
+    private final SimulationErrorLog errorLog;
     private final GlobalContext context = GlobalContext.getInstance();
     private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
     private final Map<EventTypeEnum, SimEventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
     private final List<SimEventHandler> handlerBeans;
+    // 事件ID到事件的映射，用于取消事件
+    private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
+    // 被暂停的事件链：记录所有被暂停的事件ID（包括该事件及其所有子事件）
+    private final java.util.Set<String> suspendedEventChainIds = ConcurrentHashMap.newKeySet();
 
     @Override
     public void afterPropertiesSet() {
@@ -44,13 +52,76 @@ public class SimulationEngine implements InitializingBean {
             handlerMap.put(handler.getType(), handler);
         }
     }
-// 注入新事件
+    // 注入新事件
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
         eventQueue.add(event);
+        eventIdMap.put(event.getEventId(), event);
         return event;
     }
-// 时间
+
+    /**
+     * 取消指定事件
+     * @param eventId 事件ID
+     * @return 是否成功取消（事件存在且未被处理）
+     */
+    public boolean cancelEvent(String eventId) {
+        SimEvent event = eventIdMap.get(eventId);
+        if (event == null) {
+            return false;
+        }
+        // 标记为已取消
+        event.setCancelled(true);
+        return true;
+    }
+
+    /**
+     * 检查事件链是否被暂停
+     * 递归检查当前事件及其父事件链，如果任何事件被暂停，则整个事件链被暂停
+     * @param eventId 事件ID
+     * @return 如果事件链被暂停返回true
+     */
+    private boolean isEventChainSuspended(String eventId) {
+        if (eventId == null) {
+            return false;
+        }
+        // 如果当前事件被暂停 返回true
+        if (suspendedEventChainIds.contains(eventId)) {
+            return true;
+        }
+        // 检查父事件链（递归检查所有父事件）
+        SimEvent event = eventIdMap.get(eventId);
+        if (event != null && event.getParentEventId() != null) {
+            // 递归检查父事件链
+            if (isEventChainSuspended(event.getParentEventId())) {
+                // 如果父事件链被暂停 也将当前事件标记为暂停（优化后续检查）
+                suspendedEventChainIds.add(eventId);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 暂停事件链：将指定事件及其所有子事件标记为暂停
+     * @param eventId 导致暂停的事件ID
+     */
+    private void suspendEventChain(String eventId) {
+        if (eventId == null) {
+            return;
+        }
+        suspendedEventChainIds.add(eventId);
+        log.warn("事件链已暂停: EventId={}, 该事件及其所有子事件将被跳过", eventId);
+    }
+
+    /**
+     * 获取所有被暂停的事件ID（供外部查询）
+     * @return 被暂停的事件ID集合
+     */
+    public java.util.Set<String> getSuspendedEventChainIds() {
+        return new java.util.HashSet<>(suspendedEventChainIds);
+    }
+    // 时间
     public void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
@@ -62,17 +133,39 @@ public class SimulationEngine implements InitializingBean {
             if (nextEvent.getTriggerTime() > targetSimTime) break;
 
             eventQueue.poll();
-            if (nextEvent.isCancelled()) continue;
 
+            // 从映射中移除已处理的事件
+            eventIdMap.remove(nextEvent.getEventId());
+
+            if (nextEvent.isCancelled()) {
+                log.info("事件已取消，跳过处理: EventId={}, Type={}, Time={}",
+                        nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime());
+                continue;
+            }
+
+            // 检查事件链是否被暂停（检查当前事件及其父事件链）
+            if (isEventChainSuspended(nextEvent.getEventId())) {
+                log.warn("事件链已暂停，跳过处理: EventId={}, Type={}, Time={}, ParentEventId={}",
+                        nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime(), nextEvent.getParentEventId());
+                continue;
+            }
+
+            // 改进的死循环检测逻辑
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > maxEventsPerTimestamp) {
-                    log.error("仿真异常: 时间戳 {} 发生死循环，强制熔断", lastProcessedTime);
-                    break;
+                    // 记录死循环错误
+                    String errorMsg = String.format("仿真死循环检测: 时间戳 %d 发生死循环，已处理 %d 个事件，超过阈值 %d",
+                            lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp);
+                    errorLog.recordDeadLoopError(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp, errorMsg);
+
+                    // 抛出异常，通知外部算法
+                    throw new SimulationDeadLoopException(errorMsg, lastProcessedTime, sameTimeEventCount);
                 }
             } else {
+                // 新的时间戳，重置计数器
                 lastProcessedTime = nextEvent.getTriggerTime();
-                sameTimeEventCount = 0;
+                sameTimeEventCount = 1;
             }
 
             context.setSimTime(nextEvent.getTriggerTime());
@@ -91,7 +184,17 @@ public class SimulationEngine implements InitializingBean {
                 try {
                     handler.handle(nextEvent, this, context);
                 } catch (Exception e) {
-                    log.error("事件处理异常: Type={}, Id={}", nextEvent.getType(), nextEvent.getEventId(), e);
+                    // 记录异常并暂停该事件链
+                    String errorMsg = String.format("事件处理异常: Type=%s, Id=%s, Time=%d, 事件链已暂停",
+                            nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+                    errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
+                            nextEvent.getTriggerTime(), errorMsg, e);
+                    log.error(errorMsg, e);
+
+                    // 暂停该事件链，该事件及其所有子事件将被跳过
+                    suspendEventChain(nextEvent.getEventId());
+
+                    // 不中断仿真，继续处理其他独立的事件链
                 }
             }
         }

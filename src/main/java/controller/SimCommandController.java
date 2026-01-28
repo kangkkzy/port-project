@@ -66,6 +66,14 @@ public class SimCommandController {
     }
 
     /**
+     * 取消事件
+     */
+    @PostMapping("/event/cancel")
+    public Result cancelEvent(@RequestBody model.dto.request.CancelEventReq req) {
+        return algorithmApi.cancelEvent(req.getEventId());
+    }
+
+    /**
      * 批量接收这一帧所有的控制指令 并推进时间 返回新的状态快照
      */
     @PostMapping("/stepWithCommands")

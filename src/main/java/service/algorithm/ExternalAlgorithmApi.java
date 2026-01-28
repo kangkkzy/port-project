@@ -30,4 +30,7 @@ public interface ExternalAlgorithmApi {
 
     /** 时间控制 驱动仿真时钟向后推演指定的时间 */
     void stepTime(long stepMS);
+
+    /** 事件控制 取消指定的事件 */
+    Result cancelEvent(String eventId);
 }
