@@ -119,7 +119,8 @@ public abstract class BaseDevice {
         this.posY = reachedPoint.getY();
 
         //  物理结算 (耗电
-        if (this instanceof Truck truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
+        if (this instanceof Truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {
+            Truck truck = (Truck) this;
             if (truck.getConsumeRate() != null && truck.getConsumeRate() > 0) {
                 double consume = distance * truck.getConsumeRate();
                 double newPower = Math.max(0.0, truck.getPowerLevel() - consume);

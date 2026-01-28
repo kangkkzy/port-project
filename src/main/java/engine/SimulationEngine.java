@@ -1,6 +1,7 @@
 package engine;
 
 import common.config.PhysicsConfig;
+import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
@@ -42,8 +43,10 @@ public class SimulationEngine implements InitializingBean {
     private final List<SimEventHandler> handlerBeans;
     // 事件ID到事件的映射，用于取消事件
     private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
-    // 被暂停的事件链：记录所有被暂停的事件ID（包括该事件及其所有子事件）
-    private final java.util.Set<String> suspendedEventChainIds = ConcurrentHashMap.newKeySet();
+    // 被暂停的业务类型集合：事件链对应业务逻辑（BizTypeEnum），暂停时暂停整个业务
+    private final java.util.Set<common.consts.BizTypeEnum> suspendedBizTypes = ConcurrentHashMap.newKeySet();
+    // 被暂停的事件ID集合（用于没有业务类型的独立事件，如充电、栅栏控制等）
+    private final java.util.Set<String> suspendedEventIds = ConcurrentHashMap.newKeySet();
 
     @Override
     public void afterPropertiesSet() {
@@ -76,50 +79,170 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
+     * 从事件获取业务类型（BizTypeEnum）
+     * 事件链对应业务逻辑，通过多种方式获取业务类型：
+     * 1. 从事件数据中直接获取wiRefNo（CMD_ASSIGN_TASK事件）
+     * 2. 从事件的WI subject获取wiRefNo（WI_COMPLETE事件）
+     * 3. 通过设备的currWiRefNo获取（设备已绑定任务的事件）
+     * 4. 递归查找父事件链（如果父事件还在eventIdMap中）
+     */
+    private common.consts.BizTypeEnum getBizTypeFromEvent(SimEvent event) {
+        if (event == null) {
+            return null;
+        }
+
+        // 方法1: 从事件数据中查找wiRefNo（如CMD_ASSIGN_TASK事件，最早获取业务类型）
+        if (event.getData() instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payload = (Map<String, Object>) event.getData();
+            String wiRefNo = (String) payload.get("wiRefNo");
+            if (wiRefNo != null) {
+                WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
+                if (wi != null && wi.getMoveKind() != null) {
+                    return wi.getMoveKind();
+                }
+            }
+        }
+
+        // 方法2: 从事件的WI subject获取wiRefNo（如WI_COMPLETE事件）
+        String wiRefNoFromSubject = event.getPrimarySubject("WI");
+        if (wiRefNoFromSubject != null) {
+            WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNoFromSubject);
+            if (wi != null && wi.getMoveKind() != null) {
+                return wi.getMoveKind();
+            }
+        }
+
+        // 方法3: 从事件的subjects中查找设备，通过设备的currWiRefNo获取业务类型
+        // 适用于设备已绑定任务的事件（CMD_TASK_ACK之后的事件）
+        String deviceId = event.getPrimarySubject("DEVICE");
+        if (deviceId == null) {
+            deviceId = event.getPrimarySubject("TRUCK");
+        }
+        if (deviceId == null) {
+            deviceId = event.getPrimarySubject("CRANE");
+        }
+
+        if (deviceId != null) {
+            BaseDevice device = context.getDevice(deviceId);
+            if (device != null && device.getCurrWiRefNo() != null) {
+                WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
+                if (wi != null && wi.getMoveKind() != null) {
+                    return wi.getMoveKind();
+                }
+            }
+        }
+
+        // 方法4: 递归查找父事件链（如果父事件还在eventIdMap中，说明未处理）
+        String parentEventId = event.getParentEventId();
+        if (parentEventId != null) {
+            SimEvent parentEvent = eventIdMap.get(parentEventId);
+            if (parentEvent != null) {
+                common.consts.BizTypeEnum bizType = getBizTypeFromEvent(parentEvent);
+                if (bizType != null) {
+                    return bizType;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * 检查事件链是否被暂停
-     * 递归检查当前事件及其父事件链，如果任何事件被暂停，则整个事件链被暂停
-     * @param eventId 事件ID
+     * 事件链对应业务逻辑（BizTypeEnum），优先检查业务类型是否被暂停
+     * 对于没有业务类型的独立事件（如充电、栅栏控制），基于parentEventId检查
+     * @param event 事件对象
      * @return 如果事件链被暂停返回true
      */
-    private boolean isEventChainSuspended(String eventId) {
-        if (eventId == null) {
+    private boolean isEventChainSuspended(SimEvent event) {
+        if (event == null) {
             return false;
         }
-        // 如果当前事件被暂停 返回true
-        if (suspendedEventChainIds.contains(eventId)) {
-            return true;
-        }
-        // 检查父事件链（递归检查所有父事件）
-        SimEvent event = eventIdMap.get(eventId);
-        if (event != null && event.getParentEventId() != null) {
-            // 递归检查父事件链
-            if (isEventChainSuspended(event.getParentEventId())) {
-                // 如果父事件链被暂停 也将当前事件标记为暂停（优化后续检查）
-                suspendedEventChainIds.add(eventId);
+
+        // 优先检查业务类型是否被暂停（事件链对应业务逻辑）
+        common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
+        if (bizType != null) {
+            if (suspendedBizTypes.contains(bizType)) {
                 return true;
             }
         }
+
+        // 对于没有业务类型的独立事件，检查事件ID是否被暂停
+        String eventId = event.getEventId();
+        if (suspendedEventIds.contains(eventId)) {
+            return true;
+        }
+
+        // 利用parentEventId递归检查父事件链
+        // 注意：如果父事件已被处理并从eventIdMap移除，无法直接检查
+        // 但可以通过检查父事件的业务类型是否被暂停（如果父事件有业务类型）
+        String parentEventId = event.getParentEventId();
+        if (parentEventId != null) {
+            // 检查父事件ID是否在暂停集合中（独立事件）
+            if (suspendedEventIds.contains(parentEventId)) {
+                suspendedEventIds.add(eventId); // 优化：缓存结果
+                return true;
+            }
+            // 如果父事件还在eventIdMap中（未处理），递归检查父事件链
+            SimEvent parentEvent = eventIdMap.get(parentEventId);
+            if (parentEvent != null) {
+                if (isEventChainSuspended(parentEvent)) {
+                    // 如果父事件链被暂停，根据父事件的业务类型决定暂停方式
+                    common.consts.BizTypeEnum parentBizType = getBizTypeFromEvent(parentEvent);
+                    if (parentBizType != null) {
+                        // 父事件有业务类型，当前事件也应该有（通过递归获取）
+                        // 这里已经通过suspendedBizTypes检查过了，直接返回true
+                    } else {
+                        // 父事件是独立事件，当前事件也标记为暂停
+                        suspendedEventIds.add(eventId);
+                    }
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
     /**
-     * 暂停事件链：将指定事件及其所有子事件标记为暂停
-     * @param eventId 导致暂停的事件ID
+     * 暂停事件链：基于业务类型暂停
+     * 事件链对应业务逻辑（BizTypeEnum），当某个业务的事件异常时，暂停整个业务
+     * @param event 导致暂停的事件
      */
-    private void suspendEventChain(String eventId) {
-        if (eventId == null) {
+    private void suspendEventChain(SimEvent event) {
+        if (event == null) {
             return;
         }
-        suspendedEventChainIds.add(eventId);
-        log.warn("事件链已暂停: EventId={}, 该事件及其所有子事件将被跳过", eventId);
+
+        // 优先基于业务类型暂停
+        common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
+        if (bizType != null) {
+            suspendedBizTypes.add(bizType);
+            log.warn("业务链已暂停: BizType={}, EventId={}, 该业务类型的所有事件链将被跳过",
+                    bizType.getDesc(), event.getEventId());
+        } else {
+            // 对于没有业务类型的独立事件（如充电、栅栏控制），基于事件ID暂停
+            String eventId = event.getEventId();
+            suspendedEventIds.add(eventId);
+            log.warn("事件链已暂停: EventId={}, 该事件及其所有子事件（通过parentEventId关联）将被跳过", eventId);
+        }
     }
 
     /**
-     * 获取所有被暂停的事件ID（供外部查询）
+     * 获取所有被暂停的业务类型（供外部查询）
+     * @return 被暂停的业务类型集合
+     */
+    public java.util.Set<common.consts.BizTypeEnum> getSuspendedBizTypes() {
+        return new java.util.HashSet<>(suspendedBizTypes);
+    }
+
+    /**
+     * 获取所有被暂停的事件ID（供外部查询，用于没有业务类型的独立事件）
      * @return 被暂停的事件ID集合
      */
-    public java.util.Set<String> getSuspendedEventChainIds() {
-        return new java.util.HashSet<>(suspendedEventChainIds);
+    public java.util.Set<String> getSuspendedEventIds() {
+        return new java.util.HashSet<>(suspendedEventIds);
     }
     // 时间
     public void runUntil(long targetSimTime) {
@@ -134,21 +257,26 @@ public class SimulationEngine implements InitializingBean {
 
             eventQueue.poll();
 
-            // 从映射中移除已处理的事件
-            eventIdMap.remove(nextEvent.getEventId());
-
             if (nextEvent.isCancelled()) {
                 log.info("事件已取消，跳过处理: EventId={}, Type={}, Time={}",
                         nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime());
+                // 从映射中移除已取消的事件
+                eventIdMap.remove(nextEvent.getEventId());
                 continue;
             }
 
             // 检查事件链是否被暂停（检查当前事件及其父事件链）
-            if (isEventChainSuspended(nextEvent.getEventId())) {
+            // 注意：必须在移除事件之前检查，以便能够访问父事件信息
+            if (isEventChainSuspended(nextEvent)) {
                 log.warn("事件链已暂停，跳过处理: EventId={}, Type={}, Time={}, ParentEventId={}",
                         nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime(), nextEvent.getParentEventId());
+                // 从映射中移除已暂停的事件
+                eventIdMap.remove(nextEvent.getEventId());
                 continue;
             }
+
+            // 从映射中移除已处理的事件（在确认事件将被处理后）
+            eventIdMap.remove(nextEvent.getEventId());
 
             // 改进的死循环检测逻辑
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
@@ -191,11 +319,15 @@ public class SimulationEngine implements InitializingBean {
                             nextEvent.getTriggerTime(), errorMsg, e);
                     log.error(errorMsg, e);
 
-                    // 暂停该事件链，该事件及其所有子事件将被跳过
-                    suspendEventChain(nextEvent.getEventId());
+                    // 暂停该事件链：基于业务类型暂停整个业务
+                    suspendEventChain(nextEvent);
 
                     // 不中断仿真，继续处理其他独立的事件链
                 }
+            } else {
+                // 没有处理器的事件：记录警告（可能是预留的扩展点，如FENCE_OPEN、REACH_FETCH_POS等）
+                log.warn("事件类型 {} 没有对应的处理器，事件将被忽略: EventId={}, Time={}",
+                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
             }
         }
         context.setSimTime(targetSimTime);
@@ -594,6 +726,16 @@ public class SimulationEngine implements InitializingBean {
                 device.setState(DeviceStateEnum.IDLE);
                 WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
                 if (wi != null && device.getId().equals(wi.getPutCheId())) {
+                    // 更新集装箱位置为最终位置（toPos）
+                    if (wi.getContainerId() != null) {
+                        Container container = context.getContainerMap().get(wi.getContainerId());
+                        if (container != null && wi.getToPos() != null) {
+                            container.setCurrentPos(wi.getToPos());
+                            log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]",
+                                    deviceId, container.getContainerId(), wi.getToPos());
+                        }
+                    }
+                    // 创建作业完成事件
                     SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
                     completeEvent.addSubject("WI", device.getCurrWiRefNo());
                 }

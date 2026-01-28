@@ -48,14 +48,17 @@ public class SimErrorController {
     }
 
     /**
-     * 查询所有被暂停的事件链
+     * 查询所有被暂停的业务类型和事件
      */
     @GetMapping("/suspended-chains")
     public Result listSuspendedEventChains() {
-        Set<String> suspendedIds = simulationEngine.getSuspendedEventChainIds();
+        Set<common.consts.BizTypeEnum> suspendedBizTypes = simulationEngine.getSuspendedBizTypes();
+        Set<String> suspendedEventIds = simulationEngine.getSuspendedEventIds();
         Map<String, Object> result = new HashMap<>();
-        result.put("suspendedEventIds", suspendedIds);
-        result.put("count", suspendedIds.size());
+        result.put("suspendedBizTypes", suspendedBizTypes);
+        result.put("suspendedEventIds", suspendedEventIds);
+        result.put("bizTypeCount", suspendedBizTypes.size());
+        result.put("eventIdCount", suspendedEventIds.size());
         return Result.success("查询成功", result);
     }
 }

@@ -80,7 +80,8 @@ public class SimStateController {
             dto.setCurrWiRefNo(device.getCurrWiRefNo());
 
             //  特有属性 (仅集卡
-            if (device instanceof Truck truck) {
+            if (device instanceof Truck) {
+                Truck truck = (Truck) device;
                 dto.setPowerLevel(truck.getPowerLevel());
                 dto.setNeedCharge(truck.isNeedCharge());
             }
