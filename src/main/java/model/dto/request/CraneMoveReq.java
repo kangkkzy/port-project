@@ -13,6 +13,6 @@ public class CraneMoveReq {
     private DeviceStateEnum moveType;// 移动类型 (水平/垂直)
     private Double distance;         // 移动距离 (米)
 
-    // [新增] 必须由外部算法指定
+    // 由外部算法指定
     private Double speed;            // 移动速度 (米/秒)
 }

@@ -20,7 +20,7 @@ public class PhysicsConfig {
     /**
      * 充电前设备与充电桩的对准距离阈值 (米)
      */
-    private double chargeAlignThreshold = 5.0;
+    private double chargeAlignThreshold = 1.0;
 
     /**
      * 单一时间戳下允许处理的最大事件数量（防止死循环）
