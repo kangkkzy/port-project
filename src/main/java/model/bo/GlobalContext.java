@@ -71,12 +71,15 @@ public class GlobalContext {
 
     /**
      * 根据设备ID获取具体的设备基类
+     * 单次查找，避免 containsKey + get 的二次查找
      */
     public BaseDevice getDevice(String deviceId) {
-        if (truckMap.containsKey(deviceId)) return truckMap.get(deviceId);
-        if (qcMap.containsKey(deviceId)) return qcMap.get(deviceId);
-        if (ascMap.containsKey(deviceId)) return ascMap.get(deviceId);
-        return null;
+        if (deviceId == null) return null;
+        BaseDevice d = truckMap.get(deviceId);
+        if (d != null) return d;
+        d = qcMap.get(deviceId);
+        if (d != null) return d;
+        return ascMap.get(deviceId);
     }
 
     /**

@@ -607,9 +607,12 @@ public class SimulationEngine implements InitializingBean {
             ChargingStation station = context.getChargingStationMap().get(stationId);
             if (truck != null && station != null) {
                 Double rate = station.getChargeRate();
+                if (rate == null || rate <= 0) rate = 10.0; // 默认充电速率 %/秒
                 truck.setState(DeviceStateEnum.CHARGING);
-                double powerNeeded = Truck.MAX_POWER_LEVEL - truck.getPowerLevel();
-                long chargeDurationMS = (long) (powerNeeded / rate);
+                double currentPower = truck.getPowerLevel() != null ? truck.getPowerLevel() : 0;
+                double powerNeeded = Truck.MAX_POWER_LEVEL - currentPower;
+                long chargeDurationMS = (long) ((powerNeeded / rate) * 1000); // 换算为毫秒
+                if (chargeDurationMS <= 0) chargeDurationMS = 1;
                 SimEvent fullEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + chargeDurationMS, EventTypeEnum.CHARGE_FULL, null);
                 fullEvent.addSubject("TRUCK", truckId);
                 fullEvent.addSubject("STATION", stationId);
@@ -756,18 +759,27 @@ public class SimulationEngine implements InitializingBean {
 
                 if (wi != null) {
                     BizTypeEnum bizType = wi.getMoveKind();
-                    // 验证业务类型是否需要抓箱设备
-                    if (bizType != null && common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
-                        // 验证设备是否是抓箱设备
-                        if (wi.getFetchCheId() == null || !device.getId().equals(wi.getFetchCheId())) {
-                            log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备 [{}]，业务类型: {}",
-                                    deviceId, wiRefNo, wi.getFetchCheId(), common.util.BizTypeUtil.getFullDescription(bizType));
-                            return;
+                    boolean isFetchDevice = wi.getFetchCheId() != null && device.getId().equals(wi.getFetchCheId());
+                    boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
+                    // 允许两种抓箱：1) 抓箱设备从起点抓箱；2) 放箱设备从集卡上抓箱（如装船时岸桥从集卡抓箱）
+                    boolean allowedFetch = isFetchDevice;
+                    if (!allowedFetch && isPutDevice && wi.getCarryCheId() != null && wi.getContainerId() != null) {
+                        Container c = context.getContainerMap().get(wi.getContainerId());
+                        if (c != null && wi.getCarryCheId().equals(c.getCurrentPos())) {
+                            allowedFetch = true; // 放箱设备从集卡上抓箱（箱在集卡上）
                         }
-                    } else if (bizType != null) {
-                        // 业务类型不需要抓箱设备，但触发了FETCH_DONE事件
-                        log.warn("事件[FETCH_DONE]: 业务类型 [{}] 不需要抓箱设备，但设备 [{}] 触发了抓箱完成事件",
-                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
+                    }
+                    if (!allowedFetch) {
+                        if (bizType != null && common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
+                            if (!isPutDevice || wi.getCarryCheId() == null) {
+                                log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备 [{}]，业务类型: {}",
+                                        deviceId, wiRefNo, wi.getFetchCheId(), common.util.BizTypeUtil.getFullDescription(bizType));
+                            }
+                        } else if (bizType != null) {
+                            log.warn("事件[FETCH_DONE]: 业务类型 [{}] 不需要抓箱设备，但设备 [{}] 触发了抓箱完成事件",
+                                    common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
+                        }
+                        if (!allowedFetch) return;
                     }
 
                     if (wi.getContainerId() != null) {
@@ -822,37 +834,41 @@ public class SimulationEngine implements InitializingBean {
                 WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
                 if (wi != null) {
                     BizTypeEnum bizType = wi.getMoveKind();
-                    // 验证业务类型是否需要放箱设备
-                    if (bizType != null && common.util.BizTypeUtil.requiresPutDevice(bizType)) {
-                        // 验证设备是否是放箱设备
-                        if (wi.getPutCheId() == null || !device.getId().equals(wi.getPutCheId())) {
-                            log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的放箱设备 [{}]，业务类型: {}",
-                                    deviceId, device.getCurrWiRefNo(), wi.getPutCheId(),
-                                    common.util.BizTypeUtil.getFullDescription(bizType));
-                            return;
+                    boolean isFetchDevice = wi.getFetchCheId() != null && device.getId().equals(wi.getFetchCheId());
+                    boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
+                    // 支持两种放箱：1) 抓箱设备放箱到集卡（中间步骤，位置=carryCheId）；2) 放箱设备放箱到终点（位置=toPos，触发WI_COMPLETE）
+                    if (isPutDevice) {
+                        // 放箱设备完成最终放箱
+                        if (wi.getContainerId() != null) {
+                            Container container = context.getContainerMap().get(wi.getContainerId());
+                            if (container != null && wi.getToPos() != null) {
+                                container.setCurrentPos(wi.getToPos());
+                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]，业务类型: {}",
+                                        deviceId, container.getContainerId(), wi.getToPos(),
+                                        common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                            }
                         }
-                    } else if (bizType != null) {
-                        // 业务类型不需要放箱设备，但触发了PUT_DONE事件
-                        log.warn("事件[PUT_DONE]: 业务类型 [{}] 不需要放箱设备，但设备 [{}] 触发了放箱完成事件",
-                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
-                    }
-
-                    // 更新集装箱位置为最终位置（toPos）
-                    if (wi.getContainerId() != null) {
-                        Container container = context.getContainerMap().get(wi.getContainerId());
-                        if (container != null && wi.getToPos() != null) {
-                            container.setCurrentPos(wi.getToPos());
-                            log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]，业务类型: {}",
-                                    deviceId, container.getContainerId(), wi.getToPos(),
-                                    common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
-                        }
-                    }
-
-                    // 创建作业完成事件（只有放箱设备完成时才触发WI_COMPLETE）
-                    // 对于不需要放箱的业务（DLVR、DIRECT_OUT），外部算法需要手动触发完成
-                    if (wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId())) {
                         SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
                         completeEvent.addSubject("WI", device.getCurrWiRefNo());
+                    } else if (isFetchDevice && wi.getCarryCheId() != null) {
+                        // 抓箱设备放箱到集卡（卸船/装船/提箱等中间步骤，含DLVR/DIRECT_OUT）
+                        if (wi.getContainerId() != null) {
+                            Container container = context.getContainerMap().get(wi.getContainerId());
+                            if (container != null) {
+                                String oldPos = container.getCurrentPos();
+                                container.setCurrentPos(wi.getCarryCheId());
+                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱到集卡。集装箱 [{}] 位置已从 [{}] 更新为 [{}]，业务类型: {}",
+                                        deviceId, container.getContainerId(), oldPos, wi.getCarryCheId(),
+                                        common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                            }
+                        }
+                    } else if (bizType != null && common.util.BizTypeUtil.requiresPutDevice(bizType)) {
+                        log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱/放箱设备（fetchCheId=[{}], putCheId=[{}]），业务类型: {}",
+                                deviceId, wiRefNo, wi.getFetchCheId(), wi.getPutCheId(),
+                                common.util.BizTypeUtil.getFullDescription(bizType));
+                    } else if (bizType != null) {
+                        log.warn("事件[PUT_DONE]: 业务类型 [{}] 不需要放箱设备，但设备 [{}] 触发了放箱完成事件",
+                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
                     }
                 }
             }
