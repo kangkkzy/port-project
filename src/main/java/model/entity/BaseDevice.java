@@ -145,10 +145,9 @@ public abstract class BaseDevice {
     }
 
     /**
-     * 获取当前时刻的估算坐标
+     * 查询/展示用：在给定仿真时刻的估算坐标（离散仿真中真实位置仅在 ARRIVAL 事件时更新，此处为线性插值估算）
      */
     public Point getInterpolatedPos(long currentSimTime) {
-        // 如果不在移动状态 直接返回当前坐标
         if (state != DeviceStateEnum.MOVING || currentTargetPos == null || lastStartPos == null || speed == null) {
             return new Point(posX, posY);
         }
@@ -160,7 +159,6 @@ public abstract class BaseDevice {
         if (totalDist <= arrivalThreshold) return currentTargetPos;
 
         long elapsedTime = currentSimTime - lastMoveStartTime;
-        // 使用当前指令指定的速度进行插值
         double movedDist = (elapsedTime / 1000.0) * speed;
 
         if (movedDist >= totalDist) return currentTargetPos;

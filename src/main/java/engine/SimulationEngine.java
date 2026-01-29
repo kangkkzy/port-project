@@ -257,10 +257,10 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 处理下一个事件（单事件推进）
-     * 这是离散仿真的核心：一次只处理一个事件，确保全局时钟严格按事件时间推进
+     * 单事件推进（离散仿真的唯一对外推进方式）
+     * 处理下一个到期事件，时钟推进到该事件时间；无时间窗、无按步长推进。
      *
-     * @return 处理的事件，如果没有事件则返回null
+     * @return 处理的事件，若无待处理事件则返回 null
      */
     public synchronized SimEvent stepNextEvent() {
         if (eventQueue.isEmpty()) {
@@ -341,10 +341,11 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 推进仿真到指定时间（批量处理，但内部仍是一个一个事件处理）
-     * 注意：虽然可以批量处理，但每个事件仍然是串行处理的，确保全局时钟的一致性
+     * 推进仿真到指定时间（仅用于测试或内部回放，对外不暴露）
+     * 与单事件推进机制一致：内部仍是一个一个事件串行处理，无时间窗、无按步长推进。
+     * 对外时钟推进方式仅为 {@link #stepNextEvent()}。
      *
-     * @param targetSimTime 目标仿真时间
+     * @param targetSimTime 目标仿真时间（毫秒）
      */
     public synchronized void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
@@ -381,7 +382,7 @@ public class SimulationEngine implements InitializingBean {
             processEvent(nextEvent);
         }
 
-        // 如果队列为空或下一个事件时间超过目标时间，将时钟设置为目标时间
+        // 离散仿真：时钟仅在此处和 processEvent 中更新。此处将时钟设为 targetSimTime，便于“推进到 T”的语义；状态仍以最后已处理事件为准。
         context.setSimTime(targetSimTime);
     }
 

@@ -182,18 +182,6 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         }
     }
 
-    // 推进仿真的时间
-    @Override
-    public void stepTime(long stepMS) {
-        synchronized (context) {
-            if (stepMS <= 0) {
-                throw new BusinessException("时间步进必须大于0");
-            }
-            // 批量处理到目标时间，但内部仍是一个一个事件串行处理
-            engine.runUntil(context.getSimTime() + stepMS);
-        }
-    }
-
     /**
      * 取消指定事件
      */

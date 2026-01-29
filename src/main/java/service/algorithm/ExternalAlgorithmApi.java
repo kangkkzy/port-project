@@ -28,17 +28,14 @@ public interface ExternalAlgorithmApi {
     /** 电量控制 指令集卡前往指定充电桩充电 */
     Result chargeTruck(ChargeCommandReq req);
 
-    /** 时间控制 驱动仿真时钟向后推演指定的时间 */
-    void stepTime(long stepMS);
-
     /** 事件控制 取消指定的事件 */
     Result cancelEvent(String eventId);
 
     /**
-     * 单事件推进 处理下一个事件（离散仿真的核心：一次只处理一个事件）
-     * 决策和路径规划由外部算法实现，仿真引擎只负责按时间顺序处理事件
+     * 单事件推进（离散仿真的唯一时钟推进方式）
+     * 处理下一个到期事件，时钟推进到该事件时间；无时间窗、无按步长推进。
      *
-     * @return 处理的事件信息，如果没有事件则返回null
+     * @return 本次处理的事件信息，若无待处理事件则返回 null
      */
     model.dto.snapshot.EventLogEntryDto stepNextEvent();
 }

@@ -61,18 +61,11 @@ public class SimCommandController {
         return algorithmApi.chargeTruck(req);
     }
 
-    //  仿真时钟
-
-    @PostMapping("/step")
-    public Result stepTime(@RequestParam long stepMS) {
-        algorithmApi.stepTime(stepMS);
-        return Result.success();
-    }
+    //  仿真时钟（仅单事件推进，无时间窗/按步长推进）
 
     /**
-     * 单事件推进：处理下一个事件
-     * 离散仿真的核心机制：一次只处理一个事件，确保全局时钟严格按事件时间推进
-     * 决策和路径规划由外部算法实现，仿真引擎只负责按时间顺序处理事件
+     * 单事件推进：处理下一个到期事件，时钟推进到该事件时间
+     * 离散仿真的唯一推进方式，无批量、无时间窗
      */
     @PostMapping("/step/next-event")
     public Result stepNextEvent() {
@@ -92,11 +85,11 @@ public class SimCommandController {
     }
 
     /**
-     * 批量接收这一帧所有的控制指令 并推进时间 返回新的状态快照
+     * 下发本步控制指令后执行一次单事件推进，返回状态快照
+     * 无时间窗：先下发指令（生成事件），再处理下一个到期事件
      */
     @PostMapping("/stepWithCommands")
     public Result stepWithCommands(@RequestBody StepWithCommandsReq req) {
-        //  批量下发指令
         if (req.getTruckMoves() != null) {
             req.getTruckMoves().forEach(algorithmApi::moveDevice);
         }
@@ -113,8 +106,7 @@ public class SimCommandController {
             req.getChargeCommands().forEach(algorithmApi::chargeTruck);
         }
 
-        //  推进时间
-        algorithmApi.stepTime(req.getStepMS());
+        algorithmApi.stepNextEvent();
 
         //  返回当前快照
         GlobalContext ctx = GlobalContext.getInstance();
@@ -133,7 +125,7 @@ public class SimCommandController {
         // 作业指令
         snapshot.setWorkInstructions(buildWorkInstructionSnapshots(ctx));
 
-        return Result.success("step 完成", snapshot);
+        return Result.success("单事件已处理", snapshot);
     }
 
     /**
