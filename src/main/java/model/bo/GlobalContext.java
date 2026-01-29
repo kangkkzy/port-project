@@ -16,7 +16,11 @@ public class GlobalContext {
 
     private static volatile GlobalContext instance;
 
-    // 仿真世界的绝对时间戳 (单位：毫秒)
+    /**
+     * 仿真世界的绝对时间戳 (单位：毫秒)
+     * 全局唯一的仿真时钟，所有事件都基于此时间戳进行调度和处理
+     * 时钟只能通过事件处理向前推进，确保离散仿真的时间一致性
+     */
     @Setter
     private long simTime = 0L;
 

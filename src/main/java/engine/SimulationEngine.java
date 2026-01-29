@@ -244,41 +244,121 @@ public class SimulationEngine implements InitializingBean {
     public java.util.Set<String> getSuspendedEventIds() {
         return new java.util.HashSet<>(suspendedEventIds);
     }
-    // 时间
-    public void runUntil(long targetSimTime) {
+
+    /**
+     * 重置仿真引擎状态（用于测试或场景切换）
+     * 清空事件队列、暂停状态，不影响 GlobalContext
+     */
+    public synchronized void reset() {
+        eventQueue.clear();
+        eventIdMap.clear();
+        suspendedBizTypes.clear();
+        suspendedEventIds.clear();
+    }
+
+    /**
+     * 处理下一个事件（单事件推进）
+     * 这是离散仿真的核心：一次只处理一个事件，确保全局时钟严格按事件时间推进
+     *
+     * @return 处理的事件，如果没有事件则返回null
+     */
+    public synchronized SimEvent stepNextEvent() {
+        if (eventQueue.isEmpty()) {
+            return null;
+        }
+
+        SimEvent nextEvent = eventQueue.poll();
+        if (nextEvent == null) {
+            return null;
+        }
+
+        // 处理事件
+        processEvent(nextEvent);
+
+        return nextEvent;
+    }
+
+    /**
+     * 处理单个事件的内部方法
+     *
+     * @param nextEvent 要处理的事件
+     */
+    private void processEvent(SimEvent nextEvent) {
+        // 检查事件是否被取消
+        if (nextEvent.isCancelled()) {
+            log.info("事件已取消，跳过处理: EventId={}, Type={}, Time={}",
+                    nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime());
+            eventIdMap.remove(nextEvent.getEventId());
+            return;
+        }
+
+        // 检查事件链是否被暂停
+        if (isEventChainSuspended(nextEvent)) {
+            log.warn("事件链已暂停，跳过处理: EventId={}, Type={}, Time={}, ParentEventId={}",
+                    nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime(), nextEvent.getParentEventId());
+            eventIdMap.remove(nextEvent.getEventId());
+            return;
+        }
+
+        // 从映射中移除已处理的事件
+        eventIdMap.remove(nextEvent.getEventId());
+
+        // 更新全局仿真时钟到事件触发时间（这是离散仿真的关键：时钟严格按事件时间推进）
+        context.setSimTime(nextEvent.getTriggerTime());
+
+        // 记录事件日志
+        EventLogEntryDto logEntry = new EventLogEntryDto();
+        logEntry.setSimTime(nextEvent.getTriggerTime());
+        logEntry.setType(nextEvent.getType());
+        logEntry.setEventId(nextEvent.getEventId());
+        logEntry.setParentEventId(nextEvent.getParentEventId());
+        logEntry.setSubjects(nextEvent.getSubjects());
+        eventLog.append(logEntry);
+
+        // 处理事件
+        SimEventHandler handler = handlerMap.get(nextEvent.getType());
+        if (handler != null) {
+            try {
+                handler.handle(nextEvent, this, context);
+            } catch (Exception e) {
+                // 记录异常并暂停该事件链
+                String errorMsg = String.format("事件处理异常: Type=%s, Id=%s, Time=%d, 事件链已暂停",
+                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+                errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
+                        nextEvent.getTriggerTime(), errorMsg, e);
+                log.error(errorMsg, e);
+
+                // 暂停该事件链：基于业务类型暂停整个业务
+                suspendEventChain(nextEvent);
+
+                // 不中断仿真，继续处理其他独立的事件链
+            }
+        } else {
+            // 没有处理器的事件：记录警告（可能是预留的扩展点，如FENCE_OPEN、REACH_FETCH_POS等）
+            log.warn("事件类型 {} 没有对应的处理器，事件将被忽略: EventId={}, Time={}",
+                    nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+        }
+    }
+
+    /**
+     * 推进仿真到指定时间（批量处理，但内部仍是一个一个事件处理）
+     * 注意：虽然可以批量处理，但每个事件仍然是串行处理的，确保全局时钟的一致性
+     *
+     * @param targetSimTime 目标仿真时间
+     */
+    public synchronized void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
-
         int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp();
 
         while (!eventQueue.isEmpty()) {
             SimEvent nextEvent = eventQueue.peek();
-            if (nextEvent.getTriggerTime() > targetSimTime) break;
-
-            eventQueue.poll();
-
-            if (nextEvent.isCancelled()) {
-                log.info("事件已取消，跳过处理: EventId={}, Type={}, Time={}",
-                        nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime());
-                // 从映射中移除已取消的事件
-                eventIdMap.remove(nextEvent.getEventId());
-                continue;
+            if (nextEvent.getTriggerTime() > targetSimTime) {
+                // 下一个事件的时间已经超过目标时间，停止处理
+                break;
             }
 
-            // 检查事件链是否被暂停（检查当前事件及其父事件链）
-            // 注意：必须在移除事件之前检查，以便能够访问父事件信息
-            if (isEventChainSuspended(nextEvent)) {
-                log.warn("事件链已暂停，跳过处理: EventId={}, Type={}, Time={}, ParentEventId={}",
-                        nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime(), nextEvent.getParentEventId());
-                // 从映射中移除已暂停的事件
-                eventIdMap.remove(nextEvent.getEventId());
-                continue;
-            }
-
-            // 从映射中移除已处理的事件（在确认事件将被处理后）
-            eventIdMap.remove(nextEvent.getEventId());
-
-            // 改进的死循环检测逻辑
+            // 死循环检测：检查同一时间戳的事件数量
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > maxEventsPerTimestamp) {
@@ -296,40 +376,12 @@ public class SimulationEngine implements InitializingBean {
                 sameTimeEventCount = 1;
             }
 
-            context.setSimTime(nextEvent.getTriggerTime());
-
-            // 记录事件日志
-            EventLogEntryDto logEntry = new EventLogEntryDto();
-            logEntry.setSimTime(nextEvent.getTriggerTime());
-            logEntry.setType(nextEvent.getType());
-            logEntry.setEventId(nextEvent.getEventId());
-            logEntry.setParentEventId(nextEvent.getParentEventId());
-            logEntry.setSubjects(nextEvent.getSubjects());
-            eventLog.append(logEntry);
-
-            SimEventHandler handler = handlerMap.get(nextEvent.getType());
-            if (handler != null) {
-                try {
-                    handler.handle(nextEvent, this, context);
-                } catch (Exception e) {
-                    // 记录异常并暂停该事件链
-                    String errorMsg = String.format("事件处理异常: Type=%s, Id=%s, Time=%d, 事件链已暂停",
-                            nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
-                    errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
-                            nextEvent.getTriggerTime(), errorMsg, e);
-                    log.error(errorMsg, e);
-
-                    // 暂停该事件链：基于业务类型暂停整个业务
-                    suspendEventChain(nextEvent);
-
-                    // 不中断仿真，继续处理其他独立的事件链
-                }
-            } else {
-                // 没有处理器的事件：记录警告（可能是预留的扩展点，如FENCE_OPEN、REACH_FETCH_POS等）
-                log.warn("事件类型 {} 没有对应的处理器，事件将被忽略: EventId={}, Time={}",
-                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
-            }
+            // 处理下一个事件（一个接一个）
+            eventQueue.poll();
+            processEvent(nextEvent);
         }
+
+        // 如果队列为空或下一个事件时间超过目标时间，将时钟设置为目标时间
         context.setSimTime(targetSimTime);
     }
 
@@ -640,9 +692,21 @@ public class SimulationEngine implements InitializingBean {
             CraneMoveReq req = (CraneMoveReq) payload.get("req");
             Double speed = (Double) payload.get("speed");
             if (speed == null || speed <= 0) throw new BusinessException("speed无效");
-            long travelTimeMS = (long) ((req.getDistance() / speed) * 1000);
+            double distance = req.getDistance() != null ? req.getDistance() : 0;
+            long travelTimeMS = (long) ((distance / speed) * 1000);
             device.setState(req.getMoveType());
-            SimEvent arrEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, null);
+            // 计算目标点：ARRIVAL 事件需要 Point 数据供 onArrival 使用
+            double posX = device.getPosX() != null ? device.getPosX() : 0;
+            double posY = device.getPosY() != null ? device.getPosY() : 0;
+            Point targetPoint;
+            if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
+                targetPoint = new Point(posX + distance, posY);
+            } else if (DeviceStateEnum.MOVE_VERTICAL.equals(req.getMoveType())) {
+                targetPoint = new Point(posX, posY + distance);
+            } else {
+                targetPoint = new Point(posX + distance, posY); // 默认水平
+            }
+            SimEvent arrEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, targetPoint);
             arrEvent.addSubject("CRANE", device.getId());
         }
     }
@@ -684,24 +748,50 @@ public class SimulationEngine implements InitializingBean {
             if (device != null) {
                 //  获取当前绑定的作业指令
                 String wiRefNo = device.getCurrWiRefNo();
+                if (wiRefNo == null) {
+                    log.warn("事件[FETCH_DONE]: 设备 [{}] 未绑定作业指令，跳过处理", deviceId);
+                    return;
+                }
                 WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
 
-                if (wi != null && wi.getContainerId() != null) {
-                    //  获取对应的集装箱
-                    Container container = context.getContainerMap().get(wi.getContainerId());
+                if (wi != null) {
+                    BizTypeEnum bizType = wi.getMoveKind();
+                    // 验证业务类型是否需要抓箱设备
+                    if (bizType != null && common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
+                        // 验证设备是否是抓箱设备
+                        if (wi.getFetchCheId() == null || !device.getId().equals(wi.getFetchCheId())) {
+                            log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备 [{}]，业务类型: {}",
+                                    deviceId, wiRefNo, wi.getFetchCheId(), common.util.BizTypeUtil.getFullDescription(bizType));
+                            return;
+                        }
+                    } else if (bizType != null) {
+                        // 业务类型不需要抓箱设备，但触发了FETCH_DONE事件
+                        log.warn("事件[FETCH_DONE]: 业务类型 [{}] 不需要抓箱设备，但设备 [{}] 触发了抓箱完成事件",
+                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
+                    }
 
-                    if (container != null) {
-                        //  更新箱子位置为当前设备ID 随着设备移动
-                        String oldPos = container.getCurrentPos();
-                        container.setCurrentPos(device.getId());
+                    if (wi.getContainerId() != null) {
+                        //  获取对应的集装箱
+                        Container container = context.getContainerMap().get(wi.getContainerId());
 
-                        log.info("事件[FETCH_DONE]: 设备 [{}] 完成抓箱。集装箱 [{}] 位置已从 [{}] 更新为设备上的 [{}]",
-                                deviceId, container.getContainerId(), oldPos, device.getId());
+                        if (container != null) {
+                            //  更新箱子位置为当前设备ID 随着设备移动
+                            String oldPos = container.getCurrentPos();
+                            container.setCurrentPos(device.getId());
+
+                            log.info("事件[FETCH_DONE]: 设备 [{}] 完成抓箱。集装箱 [{}] 位置已从 [{}] 更新为设备上的 [{}]，业务类型: {}",
+                                    deviceId, container.getContainerId(), oldPos, device.getId(),
+                                    common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                        } else {
+                            log.warn("事件[FETCH_DONE]: 指令 [{}] 引用的集装箱 [{}] 在系统中未找到，业务类型: {}",
+                                    wiRefNo, wi.getContainerId(), common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                        }
                     } else {
-                        log.warn("事件[FETCH_DONE]: 指令 [{}] 引用的集装箱 [{}] 在系统中未找到", wiRefNo, wi.getContainerId());
+                        log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但指令 [{}] 无箱号，业务类型: {}",
+                                deviceId, wiRefNo, common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
                     }
                 } else {
-                    log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但未绑定有效指令或指令无箱号", deviceId);
+                    log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但未绑定有效指令", deviceId);
                 }
             }
         }
@@ -724,20 +814,46 @@ public class SimulationEngine implements InitializingBean {
             BaseDevice device = context.getDevice(deviceId);
             if (device != null) {
                 device.setState(DeviceStateEnum.IDLE);
-                WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
-                if (wi != null && device.getId().equals(wi.getPutCheId())) {
+                String wiRefNo = device.getCurrWiRefNo();
+                if (wiRefNo == null) {
+                    log.warn("事件[PUT_DONE]: 设备 [{}] 未绑定作业指令，跳过处理", deviceId);
+                    return;
+                }
+                WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
+                if (wi != null) {
+                    BizTypeEnum bizType = wi.getMoveKind();
+                    // 验证业务类型是否需要放箱设备
+                    if (bizType != null && common.util.BizTypeUtil.requiresPutDevice(bizType)) {
+                        // 验证设备是否是放箱设备
+                        if (wi.getPutCheId() == null || !device.getId().equals(wi.getPutCheId())) {
+                            log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的放箱设备 [{}]，业务类型: {}",
+                                    deviceId, device.getCurrWiRefNo(), wi.getPutCheId(),
+                                    common.util.BizTypeUtil.getFullDescription(bizType));
+                            return;
+                        }
+                    } else if (bizType != null) {
+                        // 业务类型不需要放箱设备，但触发了PUT_DONE事件
+                        log.warn("事件[PUT_DONE]: 业务类型 [{}] 不需要放箱设备，但设备 [{}] 触发了放箱完成事件",
+                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
+                    }
+
                     // 更新集装箱位置为最终位置（toPos）
                     if (wi.getContainerId() != null) {
                         Container container = context.getContainerMap().get(wi.getContainerId());
                         if (container != null && wi.getToPos() != null) {
                             container.setCurrentPos(wi.getToPos());
-                            log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]",
-                                    deviceId, container.getContainerId(), wi.getToPos());
+                            log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]，业务类型: {}",
+                                    deviceId, container.getContainerId(), wi.getToPos(),
+                                    common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
                         }
                     }
-                    // 创建作业完成事件
-                    SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
-                    completeEvent.addSubject("WI", device.getCurrWiRefNo());
+
+                    // 创建作业完成事件（只有放箱设备完成时才触发WI_COMPLETE）
+                    // 对于不需要放箱的业务（DLVR、DIRECT_OUT），外部算法需要手动触发完成
+                    if (wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId())) {
+                        SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
+                        completeEvent.addSubject("WI", device.getCurrWiRefNo());
+                    }
                 }
             }
         }

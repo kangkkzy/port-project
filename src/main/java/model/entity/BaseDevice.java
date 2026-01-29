@@ -111,12 +111,19 @@ public abstract class BaseDevice {
      * 到达目的地后
      */
     public void onArrival(Point reachedPoint, long now, SimulationEngine engine, String parentEventId) {
+        if (reachedPoint == null) {
+            this.state = DeviceStateEnum.IDLE;
+            this.lastStartPos = null;
+            this.currentTargetPos = null;
+            this.speed = null;
+            return;
+        }
         Point currentPos = new Point(this.posX, this.posY);
         double distance = GisUtil.getDistance(currentPos, reachedPoint);
 
         //  更新物理坐标
-        this.posX = reachedPoint.getX();
-        this.posY = reachedPoint.getY();
+        this.posX = reachedPoint.getX() != null ? reachedPoint.getX() : this.posX;
+        this.posY = reachedPoint.getY() != null ? reachedPoint.getY() : this.posY;
 
         //  物理结算 (耗电
         if (this instanceof Truck && this.type == DeviceTypeEnum.ELECTRIC_TRUCK) {

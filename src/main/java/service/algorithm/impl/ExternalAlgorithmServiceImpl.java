@@ -189,6 +189,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             if (stepMS <= 0) {
                 throw new BusinessException("时间步进必须大于0");
             }
+            // 批量处理到目标时间，但内部仍是一个一个事件串行处理
             engine.runUntil(context.getSimTime() + stepMS);
         }
     }
@@ -208,6 +209,33 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             } else {
                 return Result.error("事件不存在或已被处理");
             }
+        }
+    }
+
+    /**
+     * 单事件推进：处理下一个事件
+     * 这是离散仿真的核心机制：一次只处理一个事件，确保全局时钟严格按事件时间推进
+     * 决策和路径规划由外部算法实现，仿真引擎只负责按时间顺序处理事件
+     *
+     * @return 处理的事件信息，如果没有事件则返回null
+     */
+    @Override
+    public model.dto.snapshot.EventLogEntryDto stepNextEvent() {
+        synchronized (context) {
+            SimEvent processedEvent = engine.stepNextEvent();
+            if (processedEvent == null) {
+                return null;
+            }
+
+            // 构造返回的事件信息
+            model.dto.snapshot.EventLogEntryDto eventDto = new model.dto.snapshot.EventLogEntryDto();
+            eventDto.setSimTime(processedEvent.getTriggerTime());
+            eventDto.setType(processedEvent.getType());
+            eventDto.setEventId(processedEvent.getEventId());
+            eventDto.setParentEventId(processedEvent.getParentEventId());
+            eventDto.setSubjects(processedEvent.getSubjects());
+
+            return eventDto;
         }
     }
 }

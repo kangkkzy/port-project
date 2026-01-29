@@ -33,4 +33,12 @@ public interface ExternalAlgorithmApi {
 
     /** 事件控制 取消指定的事件 */
     Result cancelEvent(String eventId);
+
+    /**
+     * 单事件推进 处理下一个事件（离散仿真的核心：一次只处理一个事件）
+     * 决策和路径规划由外部算法实现，仿真引擎只负责按时间顺序处理事件
+     *
+     * @return 处理的事件信息，如果没有事件则返回null
+     */
+    model.dto.snapshot.EventLogEntryDto stepNextEvent();
 }
