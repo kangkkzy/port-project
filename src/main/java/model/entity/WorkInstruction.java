@@ -12,7 +12,7 @@ public class WorkInstruction {
     private String wiRefNo;       // 指令编号 (Key)
     private String queueName;     // 指令所属的队列
     private String containerId;   // 作业的箱号id
-    private BizTypeEnum moveKind; // 指令类型 (LOAD, DSCH, RECV, DLVR)
+    private BizTypeEnum moveKind; // 指令类型 (DSCH, LOAD, YARD_SHIFT, DLVR, RECV, DIRECT_IN, DIRECT_OUT)
 
     // 抓 -> 运 -> 放
     private String fetchCheId;    // 抓箱设备
