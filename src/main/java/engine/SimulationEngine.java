@@ -29,33 +29,78 @@ import java.util.concurrent.PriorityBlockingQueue;
 import service.algorithm.impl.SimulationEventLog;
 import service.algorithm.impl.SimulationErrorLog;
 
+/**
+ * 核心仿真引擎类
+ * 负责维护仿真时钟、管理事件优先队列、调度事件处理以及处理全局异常熔断逻辑。
+ * 遵循“单一时钟、单一事件链”原则，一旦发生异常立即全局暂停。
+ */
 @Component
 @Slf4j
 @RequiredArgsConstructor
 public class SimulationEngine implements InitializingBean {
-    // 数据注入
-    private final PhysicsConfig physicsConfig;
-    private final SimulationEventLog eventLog;
-    private final SimulationErrorLog errorLog;
-    private final GlobalContext context = GlobalContext.getInstance();
+
+    // 依赖注入
+    private final PhysicsConfig physicsConfig; // 物理配置参数
+    private final SimulationEventLog eventLog; // 成功事件日志记录器
+    private final SimulationErrorLog errorLog; // 错误日志记录器
+    private final GlobalContext context = GlobalContext.getInstance(); // 全局上下文（存储所有实体状态）
+
+    // 核心数据结构
+
+    /**
+     * 事件优先队列
+     * 核心驱动源，按事件触发时间（triggerTime）排序。
+     * 仿真引擎不断从队列头部取出时间最早的事件执行。
+     */
     private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
+
+    /**
+     * 事件处理器映射表
+     * Key: 事件类型枚举, Value: 对应的处理器实例
+     */
     private final Map<EventTypeEnum, SimEventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
+
+    /** Spring 自动注入 */
     private final List<SimEventHandler> handlerBeans;
-    // 事件ID到事件的映射，用于取消事件
+
+    /**
+     * 事件ID映射表
+     * 用于快速查找事件以便取消操作。
+     */
     private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
-    // 被暂停的业务类型集合：事件链对应业务逻辑（BizTypeEnum），暂停时暂停整个业务
+
+    //  全局控制标志
+
+    /**
+     * 全局暂停
+     * 只要出现一个未捕获异常，该标志立即置为 true。
+     * 此时引擎将拒绝执行任何新事件，直到 reset() 被调用。
+     */
+    private volatile boolean globalSuspended = false;
+
+    // 以下集合仅用于日志记录和状态查询 帮助定位是哪个业务或事件导致了暂停
     private final java.util.Set<common.consts.BizTypeEnum> suspendedBizTypes = ConcurrentHashMap.newKeySet();
-    // 被暂停的事件ID集合（用于没有业务类型的独立事件，如充电、栅栏控制等）
     private final java.util.Set<String> suspendedEventIds = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 初始化方法
+     * 将 Spring 容器中的 Handler 注册到 map 中
+     */
     @Override
     public void afterPropertiesSet() {
-        // 通过 Spring 注入的处理器列表进行注册
         for (SimEventHandler handler : handlerBeans) {
             handlerMap.put(handler.getType(), handler);
         }
     }
-    // 注入新事件
+
+    /**
+     * 调度新事件
+     * * @param parentEventId 父事件ID（用于溯源）
+     * @param triggerTime   触发时间（仿真时间戳）
+     * @param type          事件类型
+     * @param data          事件携带的数据负载
+     * @return 创建并入队的事件对象
+     */
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
         eventQueue.add(event);
@@ -65,204 +110,124 @@ public class SimulationEngine implements InitializingBean {
 
     /**
      * 取消指定事件
-     * @param eventId 事件ID
-     * @return 是否成功取消（事件存在且未被处理）
+     * * @param eventId 要取消的事件ID
+     * @return 如果事件存在且标记成功返回 true，否则 false
      */
     public boolean cancelEvent(String eventId) {
         SimEvent event = eventIdMap.get(eventId);
         if (event == null) {
             return false;
         }
-        // 标记为已取消
-        event.setCancelled(true);
+        event.setCancelled(true); // 删除标记 实际执行时会跳过
         return true;
     }
 
     /**
-     * 从事件获取业务类型（BizTypeEnum）
-     * 事件链对应业务逻辑，通过多种方式获取业务类型：
-     * 1. 从事件数据中直接获取wiRefNo（CMD_ASSIGN_TASK事件）
-     * 2. 从事件的WI subject获取wiRefNo（WI_COMPLETE事件）
-     * 3. 通过设备的currWiRefNo获取（设备已绑定任务的事件）
-     * 4. 递归查找父事件链（如果父事件还在eventIdMap中）
+     * 辅助 尝试从报错事件中提取业务类型
+     * 仅用于错误日志记录 方便排查是哪个作业指令出的问题
      */
     private common.consts.BizTypeEnum getBizTypeFromEvent(SimEvent event) {
-        if (event == null) {
-            return null;
-        }
+        if (event == null) return null;
 
-        // 方法1: 从事件数据中查找wiRefNo（如CMD_ASSIGN_TASK事件，最早获取业务类型）
+        //  尝试从 payload (Map) 中获取 wiRefNo
         if (event.getData() instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             String wiRefNo = (String) payload.get("wiRefNo");
             if (wiRefNo != null) {
                 WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
-                if (wi != null && wi.getMoveKind() != null) {
-                    return wi.getMoveKind();
-                }
+                if (wi != null) return wi.getMoveKind();
             }
         }
-
-        // 方法2: 从事件的WI subject获取wiRefNo（如WI_COMPLETE事件）
+        //  尝试从 Subject (WI) 获取
         String wiRefNoFromSubject = event.getPrimarySubject("WI");
         if (wiRefNoFromSubject != null) {
             WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNoFromSubject);
-            if (wi != null && wi.getMoveKind() != null) {
-                return wi.getMoveKind();
-            }
+            if (wi != null) return wi.getMoveKind();
         }
-
-        // 方法3: 从事件的subjects中查找设备，通过设备的currWiRefNo获取业务类型
-        // 适用于设备已绑定任务的事件（CMD_TASK_ACK之后的事件）
+        //  尝试从关联的设备反查当前指令
         String deviceId = event.getPrimarySubject("DEVICE");
-        if (deviceId == null) {
-            deviceId = event.getPrimarySubject("TRUCK");
-        }
-        if (deviceId == null) {
-            deviceId = event.getPrimarySubject("CRANE");
-        }
-
+        if (deviceId == null) deviceId = event.getPrimarySubject("TRUCK");
+        if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
         if (deviceId != null) {
             BaseDevice device = context.getDevice(deviceId);
             if (device != null && device.getCurrWiRefNo() != null) {
                 WorkInstruction wi = context.getWorkInstructionMap().get(device.getCurrWiRefNo());
-                if (wi != null && wi.getMoveKind() != null) {
-                    return wi.getMoveKind();
-                }
+                if (wi != null) return wi.getMoveKind();
             }
         }
-
-        // 方法4: 递归查找父事件链（如果父事件还在eventIdMap中，说明未处理）
+        //  递归查找父事件链
         String parentEventId = event.getParentEventId();
         if (parentEventId != null) {
             SimEvent parentEvent = eventIdMap.get(parentEventId);
-            if (parentEvent != null) {
-                common.consts.BizTypeEnum bizType = getBizTypeFromEvent(parentEvent);
-                if (bizType != null) {
-                    return bizType;
-                }
-            }
+            if (parentEvent != null) return getBizTypeFromEvent(parentEvent);
         }
-
         return null;
     }
 
     /**
-     * 检查事件链是否被暂停
-     * 事件链对应业务逻辑（BizTypeEnum），优先检查业务类型是否被暂停
-     * 对于没有业务类型的独立事件（如充电、栅栏控制），基于parentEventId检查
-     * @param event 事件对象
-     * @return 如果事件链被暂停返回true
+     * 检查是否处于全局暂停状态
      */
-    private boolean isEventChainSuspended(SimEvent event) {
-        if (event == null) {
-            return false;
-        }
-
-        // 优先检查业务类型是否被暂停（事件链对应业务逻辑）
-        common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
-        if (bizType != null) {
-            if (suspendedBizTypes.contains(bizType)) {
-                return true;
-            }
-        }
-
-        // 对于没有业务类型的独立事件，检查事件ID是否被暂停
-        String eventId = event.getEventId();
-        if (suspendedEventIds.contains(eventId)) {
-            return true;
-        }
-
-        // 利用parentEventId递归检查父事件链
-        // 注意：如果父事件已被处理并从eventIdMap移除，无法直接检查
-        // 但可以通过检查父事件的业务类型是否被暂停（如果父事件有业务类型）
-        String parentEventId = event.getParentEventId();
-        if (parentEventId != null) {
-            // 检查父事件ID是否在暂停集合中（独立事件）
-            if (suspendedEventIds.contains(parentEventId)) {
-                suspendedEventIds.add(eventId); // 优化：缓存结果
-                return true;
-            }
-            // 如果父事件还在eventIdMap中（未处理），递归检查父事件链
-            SimEvent parentEvent = eventIdMap.get(parentEventId);
-            if (parentEvent != null) {
-                if (isEventChainSuspended(parentEvent)) {
-                    // 如果父事件链被暂停，根据父事件的业务类型决定暂停方式
-                    common.consts.BizTypeEnum parentBizType = getBizTypeFromEvent(parentEvent);
-                    if (parentBizType != null) {
-                        // 父事件有业务类型，当前事件也应该有（通过递归获取）
-                        // 这里已经通过suspendedBizTypes检查过了，直接返回true
-                    } else {
-                        // 父事件是独立事件，当前事件也标记为暂停
-                        suspendedEventIds.add(eventId);
-                    }
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    private boolean isGlobalSuspended() {
+        return globalSuspended;
     }
 
     /**
-     * 暂停事件链：基于业务类型暂停
-     * 事件链对应业务逻辑（BizTypeEnum），当某个业务的事件异常时，暂停整个业务
-     * @param event 导致暂停的事件
+     * 触发全局暂停
+     * 当发生未捕获异常时调用。记录错误上下文，并锁死引擎。
      */
-    private void suspendEventChain(SimEvent event) {
-        if (event == null) {
-            return;
-        }
+    private void triggerGlobalSuspend(SimEvent event) {
+        this.globalSuspended = true;
 
-        // 优先基于业务类型暂停
-        common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
-        if (bizType != null) {
-            suspendedBizTypes.add(bizType);
-            log.warn("业务链已暂停: BizType={}, EventId={}, 该业务类型的所有事件链将被跳过",
-                    bizType.getDesc(), event.getEventId());
+        if (event != null) {
+            log.error("！！！仿真引擎触发全局暂停！！！错误源头事件: Id={}, Type={}", event.getEventId(), event.getType());
+            // 记录元数据供外部查询接口使用
+            suspendedEventIds.add(event.getEventId());
+            common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
+            if (bizType != null) {
+                suspendedBizTypes.add(bizType);
+            }
         } else {
-            // 对于没有业务类型的独立事件（如充电、栅栏控制），基于事件ID暂停
-            String eventId = event.getEventId();
-            suspendedEventIds.add(eventId);
-            log.warn("事件链已暂停: EventId={}, 该事件及其所有子事件（通过parentEventId关联）将被跳过", eventId);
+            log.error("！！！仿真引擎触发全局暂停！！！（未知事件源）");
         }
     }
 
-    /**
-     * 获取所有被暂停的业务类型（供外部查询）
-     * @return 被暂停的业务类型集合
-     */
     public java.util.Set<common.consts.BizTypeEnum> getSuspendedBizTypes() {
         return new java.util.HashSet<>(suspendedBizTypes);
     }
 
-    /**
-     * 获取所有被暂停的事件ID（供外部查询，用于没有业务类型的独立事件）
-     * @return 被暂停的事件ID集合
-     */
     public java.util.Set<String> getSuspendedEventIds() {
         return new java.util.HashSet<>(suspendedEventIds);
     }
 
     /**
-     * 重置仿真引擎状态（用于测试或场景切换）
-     * 清空事件队列、暂停状态，不影响 GlobalContext
+     * 重置仿真
+     * 清空队列、重置暂停标志、清除错误记录。
+     * 通常由用户在前端点击“重置”或“重新开始”触发。
      */
     public synchronized void reset() {
         eventQueue.clear();
         eventIdMap.clear();
         suspendedBizTypes.clear();
         suspendedEventIds.clear();
+        globalSuspended = false; // 解除锁定
+        log.info("仿真引擎已重置，全局暂停状态已解除。");
     }
 
     /**
-     * 单事件推进（离散仿真的唯一对外推进方式）
-     * 处理下一个到期事件，时钟推进到该事件时间；无时间窗、无按步长推进。
-     *
-     * @return 处理的事件，若无待处理事件则返回 null
+     * 单步执行下一个事件
+     * 1. 检查全局暂停标志。
+     * 2. 取出队首事件。
+     * 3. 调用 processEvent 执行。
+     * * @return 执行的事件对象，如果队列为空或已暂停则返回 null
      */
     public synchronized SimEvent stepNextEvent() {
+        // 安全检查：如果已暂停，拒绝执行
+        if (globalSuspended) {
+            log.warn("拒绝执行：仿真引擎处于全局暂停状态，请检查错误日志并重置。");
+            return null;
+        }
+
         if (eventQueue.isEmpty()) {
             return null;
         }
@@ -272,41 +237,35 @@ public class SimulationEngine implements InitializingBean {
             return null;
         }
 
-        // 处理事件
+        // 处理核心逻辑
         processEvent(nextEvent);
 
         return nextEvent;
     }
 
     /**
-     * 处理单个事件的内部方法
-     *
-     * @param nextEvent 要处理的事件
+     * 内部核心方法：处理单个事件
+     * 包含完整的 try-catch 逻辑 确保任何异常都会触发全局暂停。
      */
     private void processEvent(SimEvent nextEvent) {
-        // 检查事件是否被取消
+        //   检查事件是否已被取消
         if (nextEvent.isCancelled()) {
-            log.info("事件已取消，跳过处理: EventId={}, Type={}, Time={}",
-                    nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime());
             eventIdMap.remove(nextEvent.getEventId());
             return;
         }
 
-        // 检查事件链是否被暂停
-        if (isEventChainSuspended(nextEvent)) {
-            log.warn("事件链已暂停，跳过处理: EventId={}, Type={}, Time={}, ParentEventId={}",
-                    nextEvent.getEventId(), nextEvent.getType(), nextEvent.getTriggerTime(), nextEvent.getParentEventId());
-            eventIdMap.remove(nextEvent.getEventId());
+        //   检查事件是否暂停
+        if (globalSuspended) {
             return;
         }
 
-        // 从映射中移除已处理的事件
+        //  从映射中移除当前事件
         eventIdMap.remove(nextEvent.getEventId());
 
-        // 更新全局仿真时钟到事件触发时间（这是离散仿真的关键：时钟严格按事件时间推进）
+        //  更新全局仿真时钟
         context.setSimTime(nextEvent.getTriggerTime());
 
-        // 记录事件日志
+        //  记录历史日志
         EventLogEntryDto logEntry = new EventLogEntryDto();
         logEntry.setSimTime(nextEvent.getTriggerTime());
         logEntry.setType(nextEvent.getType());
@@ -315,37 +274,35 @@ public class SimulationEngine implements InitializingBean {
         logEntry.setSubjects(nextEvent.getSubjects());
         eventLog.append(logEntry);
 
-        // 处理事件
+        //  分发到具体 Handler 执行
         SimEventHandler handler = handlerMap.get(nextEvent.getType());
         if (handler != null) {
             try {
                 handler.handle(nextEvent, this, context);
             } catch (Exception e) {
-                // 记录异常并暂停该事件链
-                String errorMsg = String.format("事件处理异常: Type=%s, Id=%s, Time=%d, 事件链已暂停",
+                //  异常熔断逻辑
+                String errorMsg = String.format("事件处理异常，引擎全局暂停: Type=%s, Id=%s, Time=%d",
                         nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+
+                // 记录错误日志
                 errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
-                        nextEvent.getTriggerTime(), errorMsg, e);
+                        nextEvent.getTriggerTime(), errorMsg, e, true);
                 log.error(errorMsg, e);
 
-                // 暂停该事件链：基于业务类型暂停整个业务
-                suspendEventChain(nextEvent);
-
-                // 不中断仿真，继续处理其他独立的事件链
+                // 立即触发全局暂停
+                triggerGlobalSuspend(nextEvent);
             }
         } else {
-            // 没有处理器的事件：记录警告（可能是预留的扩展点，如FENCE_OPEN、REACH_FETCH_POS等）
-            log.warn("事件类型 {} 没有对应的处理器，事件将被忽略: EventId={}, Time={}",
-                    nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+            log.warn("事件类型 {} 没有对应的处理器，事件将被忽略", nextEvent.getType());
         }
     }
 
     /**
-     * 推进仿真到指定时间（仅用于测试或内部回放，对外不暴露）
-     * 与单事件推进机制一致：内部仍是一个一个事件串行处理，无时间窗、无按步长推进。
-     * 对外时钟推进方式仅为 {@link #stepNextEvent()}。
+     * 连续运行直到指定时间
+     * 包含死循环检测机制（同一时间戳事件过多）
+     * 循环中会不断检查 globalSuspended 标志
      *
-     * @param targetSimTime 目标仿真时间（毫秒）
+     * @param targetSimTime 目标仿真时间
      */
     public synchronized void runUntil(long targetSimTime) {
         int sameTimeEventCount = 0;
@@ -353,51 +310,54 @@ public class SimulationEngine implements InitializingBean {
         int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp();
 
         while (!eventQueue.isEmpty()) {
-            SimEvent nextEvent = eventQueue.peek();
-            if (nextEvent.getTriggerTime() > targetSimTime) {
-                // 下一个事件的时间已经超过目标时间，停止处理
+            // 每次循环前检查暂停状态
+            if (globalSuspended) {
+                log.warn("runUntil 中止：引擎已全局暂停");
                 break;
             }
 
-            // 死循环检测：检查同一时间戳的事件数量
+            SimEvent nextEvent = eventQueue.peek();
+            if (nextEvent.getTriggerTime() > targetSimTime) {
+                break; // 已达到目标时间 停止
+            }
+
+            //  死循环保护机制
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > maxEventsPerTimestamp) {
-                    // 记录死循环错误
-                    String errorMsg = String.format("仿真死循环检测: 时间戳 %d 发生死循环，已处理 %d 个事件，超过阈值 %d",
-                            lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp);
+                    String errorMsg = String.format("仿真死循环检测: 时间戳 %d 发生死循环（超过 %d 个零耗时事件）",
+                            lastProcessedTime, maxEventsPerTimestamp);
                     errorLog.recordDeadLoopError(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp, errorMsg);
 
-                    // 抛出异常，通知外部算法
+                    // 死循环也视为严重错误 触发暂停
+                    triggerGlobalSuspend(nextEvent);
                     throw new SimulationDeadLoopException(errorMsg, lastProcessedTime, sameTimeEventCount);
                 }
             } else {
-                // 新的时间戳，重置计数器
                 lastProcessedTime = nextEvent.getTriggerTime();
                 sameTimeEventCount = 1;
             }
 
-            // 处理下一个事件（一个接一个）
+            // 取出并执行
             eventQueue.poll();
             processEvent(nextEvent);
         }
 
-        // 离散仿真：时钟仅在此处和 processEvent 中更新。此处将时钟设为 targetSimTime，便于“推进到 T”的语义；状态仍以最后已处理事件为准。
-        context.setSimTime(targetSimTime);
+        // 只有正常结束才更新时钟到目标时间 避免界面时间跳变
+        if (!globalSuspended) {
+            context.setSimTime(targetSimTime);
+        }
     }
+// 内部handler类 实现接口 处理特定类型的事件
 
     /**
-     *  栅栏控制处理器
-     * 仅更新状态 如果是开启操作 清空等待列表（数据维护） 但不发送任何唤醒事件
+     * 电子围栏控制处理器
+     * 处理 FENCE_CONTROL 事件，开启或关闭围栏。
      */
     @org.springframework.stereotype.Component
     public static class FenceControlHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.FENCE_CONTROL;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.FENCE_CONTROL; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String fenceId = event.getPrimarySubject("FENCE");
@@ -405,27 +365,23 @@ public class SimulationEngine implements InitializingBean {
             if (fence != null) {
                 FenceStateEnum status = (FenceStateEnum) event.getData();
                 fence.setStatus(status.getCode());
-
-                // 如果栅栏变更为通行 物理上不再阻挡任何车辆
+                // 如果围栏变为通过状态，清空等待队列
                 if (FenceStateEnum.PASSABLE.equals(status)) {
                     fence.getWaitingTrucks().clear();
                 }
-
                 log.info("栅栏 {} 状态已更新为: {}", fenceId, status.getDesc());
             }
         }
     }
+
     /**
-     * 任务指派处理
+     * 指令下发处理器
+     * 收到 CMD_ASSIGN_TASK 后，生成 ACK 确认事件。
      */
     @org.springframework.stereotype.Component
     public static class CmdAssignTaskHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_ASSIGN_TASK;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_ASSIGN_TASK; }
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -434,21 +390,20 @@ public class SimulationEngine implements InitializingBean {
             BaseDevice device = context.getDevice(deviceId);
             if (device == null) return;
             Map<String, Object> payload = (Map<String, Object>) event.getData();
+            // 调度 ACK 事件
             SimEvent ackEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.CMD_TASK_ACK, payload);
             ackEvent.addSubject("DEVICE", deviceId);
         }
     }
+
     /**
-     * 任务确认处理
+     * 任务确认处理器
+     * 设备确认接收任务 绑定指令号 状态置为 WORKING。
      */
     @org.springframework.stereotype.Component
     public static class CmdTaskAckHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_TASK_ACK;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_TASK_ACK; }
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -462,17 +417,15 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+
     /**
-     * 移动指令处理
+     * 车辆移动指令处理器
+     * 设置速度和目标 并调度 MOVE_START 事件
      */
     @org.springframework.stereotype.Component
     public static class CmdMoveHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_MOVE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_MOVE; }
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -480,27 +433,24 @@ public class SimulationEngine implements InitializingBean {
             BaseDevice device = context.getDevice(truckId);
             if (device == null) throw new BusinessException("移动指令异常: 设备不存在");
             Map<String, Object> payload = (Map<String, Object>) event.getData();
-
             Double speed = (Double) payload.get("speed");
             Point target = (Point) payload.get("target");
             device.setSpeed(speed);
             device.setCurrentTargetPos(target);
-
+            // 立即开始移动
             SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
             moveStart.addSubject("TRUCK", truckId);
         }
     }
+
     /**
-     * 开始移动处理
+     * 移动开始处理器
+     * 调用设备的 onMoveStart 方法（计算路径、预计到达时间等）。
      */
     @org.springframework.stereotype.Component
     public static class MoveStartHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.MOVE_START;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.MOVE_START; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String deviceId = event.getPrimarySubject("TRUCK");
@@ -511,17 +461,15 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+
     /**
-     * 到达处理
+     * 到达处理器
+     * 设备到达目标点 更新位置 并上报 IDLE 状态
      */
     @org.springframework.stereotype.Component
     public static class ArrivalHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.ARRIVAL;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.ARRIVAL; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
@@ -534,17 +482,15 @@ public class SimulationEngine implements InitializingBean {
             }
         }
     }
+
     /**
-     * 空闲上报处理  记录日志
+     * 空闲上报处理器
+     * 仅记录日志 表明设备已完成动作
      */
     @org.springframework.stereotype.Component
     public static class ReportIdleHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.REPORT_IDLE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.REPORT_IDLE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
@@ -552,17 +498,15 @@ public class SimulationEngine implements InitializingBean {
             log.info("设备 {} 动作结束，当前空闲", id);
         }
     }
+
     /**
-     * 充电指令处理
+     * 充电指令处理器
+     * 校验位置对准 绑定充电桩 调度 CHARGING_START
      */
     @org.springframework.stereotype.Component
     public static class CmdChargeHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_CHARGE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_CHARGE; }
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -574,6 +518,7 @@ public class SimulationEngine implements InitializingBean {
             ChargingStation station = context.getChargingStationMap().get(stationId);
             if (station == null) throw new BusinessException("充电桩不存在");
 
+            // 距离校验
             Point truckPos = new Point(truck.getPosX(), truck.getPosY());
             Point stationPos = new Point(station.getPosX(), station.getPosY());
             double alignThreshold = context.getPhysicsConfig().getChargeAlignThreshold();
@@ -589,17 +534,15 @@ public class SimulationEngine implements InitializingBean {
             chargeStart.addSubject("STATION", stationId);
         }
     }
+
     /**
-     * 充电开始处理
+     * 开始充电处理器
+     * 计算充电所需时间，调度 CHARGE_FULL 事件。
      */
     @org.springframework.stereotype.Component
     public static class ChargingStartHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CHARGING_START;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CHARGING_START; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String truckId = event.getPrimarySubject("TRUCK");
@@ -608,29 +551,28 @@ public class SimulationEngine implements InitializingBean {
             ChargingStation station = context.getChargingStationMap().get(stationId);
             if (truck != null && station != null) {
                 Double rate = station.getChargeRate();
-                if (rate == null || rate <= 0) rate = 10.0; // 默认充电速率 %/秒
+                if (rate == null || rate <= 0) rate = 10.0;
                 truck.setState(DeviceStateEnum.CHARGING);
                 double currentPower = truck.getPowerLevel() != null ? truck.getPowerLevel() : 0;
                 double powerNeeded = Truck.MAX_POWER_LEVEL - currentPower;
-                long chargeDurationMS = (long) ((powerNeeded / rate) * 1000); // 换算为毫秒
+                long chargeDurationMS = (long) ((powerNeeded / rate) * 1000);
                 if (chargeDurationMS <= 0) chargeDurationMS = 1;
+                // 安排充电完成事件
                 SimEvent fullEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + chargeDurationMS, EventTypeEnum.CHARGE_FULL, null);
                 fullEvent.addSubject("TRUCK", truckId);
                 fullEvent.addSubject("STATION", stationId);
             }
         }
     }
+
     /**
-     * 充电完成处理
+     * 充电完成处理器
+     * 恢复电量，解绑充电桩，设备恢复 IDLE。
      */
     @org.springframework.stereotype.Component
     public static class ChargeFullHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CHARGE_FULL;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CHARGE_FULL; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String truckId = event.getPrimarySubject("TRUCK");
@@ -653,16 +595,13 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 栅栏指令转换处理
+     * 围栏命令转换处理器
+     * 将 CMD_FENCE_TOGGLE 转换为 FENCE_CONTROL 事件
      */
     @org.springframework.stereotype.Component
     public static class CmdFenceHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_FENCE_TOGGLE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_FENCE_TOGGLE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String fenceId = event.getPrimarySubject("FENCE");
@@ -676,16 +615,13 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 桥吊/龙门吊 移动指令处理
+     * 吊具移动处理器
+     * 计算移动时间（水平/垂直），调度 ARRIVAL 事件
      */
     @org.springframework.stereotype.Component
     public static class CmdCraneMoveHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_CRANE_MOVE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_CRANE_MOVE; }
         @Override
         @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
@@ -698,110 +634,100 @@ public class SimulationEngine implements InitializingBean {
             if (speed == null || speed <= 0) throw new BusinessException("speed无效");
             double distance = req.getDistance() != null ? req.getDistance() : 0;
             long travelTimeMS = (long) ((distance / speed) * 1000);
+
             device.setState(req.getMoveType());
-            // 计算目标点：ARRIVAL 事件需要 Point 数据供 onArrival 使用
             double posX = device.getPosX() != null ? device.getPosX() : 0;
             double posY = device.getPosY() != null ? device.getPosY() : 0;
+
+            // 计算新的坐标点
             Point targetPoint;
             if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
                 targetPoint = new Point(posX + distance, posY);
             } else if (DeviceStateEnum.MOVE_VERTICAL.equals(req.getMoveType())) {
                 targetPoint = new Point(posX, posY + distance);
             } else {
-                targetPoint = new Point(posX + distance, posY); // 默认水平
+                targetPoint = new Point(posX + distance, posY);
             }
+
             SimEvent arrEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, targetPoint);
             arrEvent.addSubject("CRANE", device.getId());
         }
     }
 
     /**
-     * 桥吊/龙门吊 操作处理
+     * 吊具通用操作处理器
+     * 处理如 抓箱(PICKUP)、放箱(SETDOWN) 等操作 计算耗时后调度结果事件
      */
     @org.springframework.stereotype.Component
     public static class CmdCraneOpHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.CMD_CRANE_OP;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.CMD_CRANE_OP; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             CraneOperationReq req = (CraneOperationReq) event.getData();
+            // 调度操作完成事件（例如 FETCH_DONE 或 PUT_DONE）
             SimEvent opEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + req.getDurationMS(), req.getAction(), null);
             opEvent.addSubject("CRANE", req.getCraneId());
         }
     }
 
-    // 抓箱完成处理
+    /**
+     * 抓箱完成处理器
+     * 核心业务逻辑：校验设备是否匹配指令，更新集装箱位置（从 地面/集卡 -> 设备）
+     */
     @org.springframework.stereotype.Component
     public static class FetchDoneHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.FETCH_DONE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.FETCH_DONE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
-            //  获取执行抓箱的设备
             String deviceId = event.getPrimarySubject("CRANE");
             BaseDevice device = context.getDevice(deviceId);
-
             if (device != null) {
-                //  获取当前绑定的作业指令
                 String wiRefNo = device.getCurrWiRefNo();
                 if (wiRefNo == null) {
                     log.warn("事件[FETCH_DONE]: 设备 [{}] 未绑定作业指令，跳过处理", deviceId);
                     return;
                 }
                 WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
-
                 if (wi != null) {
                     BizTypeEnum bizType = wi.getMoveKind();
+                    // 校验当前设备是否是该指令指定的抓箱设备
                     boolean isFetchDevice = wi.getFetchCheId() != null && device.getId().equals(wi.getFetchCheId());
                     boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
-                    // 允许两种抓箱：1) 抓箱设备从起点抓箱；2) 放箱设备从集卡上抓箱（如装船时岸桥从集卡抓箱）
                     boolean allowedFetch = isFetchDevice;
+
+                    // 特殊情况：如果是放箱设备 且集卡已在集装箱位置 也允许抓取
                     if (!allowedFetch && isPutDevice && wi.getCarryCheId() != null && wi.getContainerId() != null) {
                         Container c = context.getContainerMap().get(wi.getContainerId());
                         if (c != null && wi.getCarryCheId().equals(c.getCurrentPos())) {
-                            allowedFetch = true; // 放箱设备从集卡上抓箱（箱在集卡上）
+                            allowedFetch = true;
                         }
                     }
+
                     if (!allowedFetch) {
+                        // 如果业务类型需要抓箱但当前设备不匹配 记录错误
                         if (bizType != null && common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
                             if (!isPutDevice || wi.getCarryCheId() == null) {
-                                log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备 [{}]，业务类型: {}",
-                                        deviceId, wiRefNo, wi.getFetchCheId(), common.util.BizTypeUtil.getFullDescription(bizType));
+                                log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备", deviceId, wiRefNo);
                             }
-                        } else if (bizType != null) {
-                            log.warn("事件[FETCH_DONE]: 业务类型 [{}] 不需要抓箱设备，但设备 [{}] 触发了抓箱完成事件",
-                                    common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
                         }
                         if (!allowedFetch) return;
                     }
 
+                    // 移动集装箱 位置变为当前设备ID（表示箱子在设备上）
                     if (wi.getContainerId() != null) {
-                        //  获取对应的集装箱
                         Container container = context.getContainerMap().get(wi.getContainerId());
-
                         if (container != null) {
-                            //  更新箱子位置为当前设备ID 随着设备移动
                             String oldPos = container.getCurrentPos();
                             container.setCurrentPos(device.getId());
-
-                            log.info("事件[FETCH_DONE]: 设备 [{}] 完成抓箱。集装箱 [{}] 位置已从 [{}] 更新为设备上的 [{}]，业务类型: {}",
-                                    deviceId, container.getContainerId(), oldPos, device.getId(),
-                                    common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                            log.info("事件[FETCH_DONE]: 设备 [{}] 完成抓箱。集装箱 [{}] 位置已从 [{}] 更新为设备上的 [{}]",
+                                    deviceId, container.getContainerId(), oldPos, device.getId());
                         } else {
-                            log.warn("事件[FETCH_DONE]: 指令 [{}] 引用的集装箱 [{}] 在系统中未找到，业务类型: {}",
-                                    wiRefNo, wi.getContainerId(), common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                            log.warn("事件[FETCH_DONE]: 指令 [{}] 引用的集装箱 [{}] 在系统中未找到", wiRefNo, wi.getContainerId());
                         }
                     } else {
-                        log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但指令 [{}] 无箱号，业务类型: {}",
-                                deviceId, wiRefNo, common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                        log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但指令 [{}] 无箱号", deviceId, wiRefNo);
                     }
                 } else {
                     log.warn("事件[FETCH_DONE]: 设备 [{}] 完成抓箱动作，但未绑定有效指令", deviceId);
@@ -811,16 +737,13 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 放箱完成处理 作业完成处理
+     * 放箱完成处理器
+     * 核心业务逻辑：更新集装箱位置（设备 -> 目标位置/集卡），完成指令。
      */
     @org.springframework.stereotype.Component
     public static class PutDoneHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.PUT_DONE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.PUT_DONE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String deviceId = event.getPrimarySubject("CRANE");
@@ -837,39 +760,34 @@ public class SimulationEngine implements InitializingBean {
                     BizTypeEnum bizType = wi.getMoveKind();
                     boolean isFetchDevice = wi.getFetchCheId() != null && device.getId().equals(wi.getFetchCheId());
                     boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
-                    // 支持两种放箱：1) 抓箱设备放箱到集卡（中间步骤，位置=carryCheId）；2) 放箱设备放箱到终点（位置=toPos，触发WI_COMPLETE）
+
+                    // 情况1：当前是指令的放箱设备（结束流程）
                     if (isPutDevice) {
-                        // 放箱设备完成最终放箱
                         if (wi.getContainerId() != null) {
                             Container container = context.getContainerMap().get(wi.getContainerId());
                             if (container != null && wi.getToPos() != null) {
                                 container.setCurrentPos(wi.getToPos());
-                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]，业务类型: {}",
-                                        deviceId, container.getContainerId(), wi.getToPos(),
-                                        common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱。集装箱 [{}] 位置已更新为最终位置 [{}]",
+                                        deviceId, container.getContainerId(), wi.getToPos());
                             }
                         }
+                        // 触发指令完成事件
                         SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
                         completeEvent.addSubject("WI", device.getCurrWiRefNo());
+
+                        // 情况2：当前是抓箱设备，且要把箱子放到集卡上（中转流程）
                     } else if (isFetchDevice && wi.getCarryCheId() != null) {
-                        // 抓箱设备放箱到集卡（卸船/装船/提箱等中间步骤，含DLVR/DIRECT_OUT）
                         if (wi.getContainerId() != null) {
                             Container container = context.getContainerMap().get(wi.getContainerId());
                             if (container != null) {
                                 String oldPos = container.getCurrentPos();
                                 container.setCurrentPos(wi.getCarryCheId());
-                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱到集卡。集装箱 [{}] 位置已从 [{}] 更新为 [{}]，业务类型: {}",
-                                        deviceId, container.getContainerId(), oldPos, wi.getCarryCheId(),
-                                        common.util.BizTypeUtil.getFullDescription(wi.getMoveKind()));
+                                log.info("事件[PUT_DONE]: 设备 [{}] 完成放箱到集卡。集装箱 [{}] 位置已从 [{}] 更新为 [{}]",
+                                        deviceId, container.getContainerId(), oldPos, wi.getCarryCheId());
                             }
                         }
                     } else if (bizType != null && common.util.BizTypeUtil.requiresPutDevice(bizType)) {
-                        log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱/放箱设备（fetchCheId=[{}], putCheId=[{}]），业务类型: {}",
-                                deviceId, wiRefNo, wi.getFetchCheId(), wi.getPutCheId(),
-                                common.util.BizTypeUtil.getFullDescription(bizType));
-                    } else if (bizType != null) {
-                        log.warn("事件[PUT_DONE]: 业务类型 [{}] 不需要放箱设备，但设备 [{}] 触发了放箱完成事件",
-                                common.util.BizTypeUtil.getFullDescription(bizType), deviceId);
+                        log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱/放箱设备", deviceId, wiRefNo);
                     }
                 }
             }
@@ -877,16 +795,13 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 指令完成处理
+     * 指令完成处理器
+     * 标记 WorkInstruction 状态为 COMPLETED。
      */
     @org.springframework.stereotype.Component
     public static class WiCompleteHandler implements SimEventHandler {
-
         @Override
-        public EventTypeEnum getType() {
-            return EventTypeEnum.WI_COMPLETE;
-        }
-
+        public EventTypeEnum getType() { return EventTypeEnum.WI_COMPLETE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String wiRefNo = event.getPrimarySubject("WI");

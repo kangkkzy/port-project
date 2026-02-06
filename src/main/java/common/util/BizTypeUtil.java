@@ -42,7 +42,7 @@ public class BizTypeUtil {
      * 根据业务类型获取推荐的抓箱设备类型
      *
      * @param bizType 业务类型
-     * @return 推荐的设备类型，如果不需要则返回null
+     * @return 对应的设备类型，如果不需要则返回null
      */
     public static DeviceTypeEnum getRecommendedFetchDeviceType(BizTypeEnum bizType) {
         if (bizType == null) {
@@ -68,7 +68,7 @@ public class BizTypeUtil {
      * 根据业务类型获取推荐的放箱设备类型
      *
      * @param bizType 业务类型
-     * @return 推荐的设备类型，如果不需要则返回null
+     * @return 对应的设备类型，如果不需要则返回null
      */
     public static DeviceTypeEnum getRecommendedPutDeviceType(BizTypeEnum bizType) {
         if (bizType == null) {
