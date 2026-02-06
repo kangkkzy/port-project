@@ -5,7 +5,7 @@ import lombok.Data;
 
 /**
  * 龙门吊/桥吊移动请求
- * 修改注：外部算法必须指定速度，内部不再读取默认配置
+ * 外部算法必须指定速度，内部不再读取默认配置
  */
 @Data
 public class CraneMoveReq {

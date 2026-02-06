@@ -61,9 +61,6 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
             boolean isDeviceMatching = BizTypeUtil.isDeviceMatchingWorkInstruction(req.getDeviceId(), wi);
             if (!isDeviceMatching) {
                 // 警告但不阻止（外部算法可能有意指派）
-                // 实际项目中可以根据需要决定是否抛出异常
-                // throw new BusinessException(String.format("设备 [%s] 不匹配指令 [%s] 的业务类型 [%s] 的设备要求",
-                //     req.getDeviceId(), req.getWiRefNo(), BizTypeUtil.getFullDescription(bizType)));
             }
         }
 
