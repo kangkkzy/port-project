@@ -166,13 +166,6 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 检查是否处于全局暂停状态
-     */
-    private boolean isGlobalSuspended() {
-        return globalSuspended;
-    }
-
-    /**
      * 触发全局暂停
      * 当发生未捕获异常时调用。记录错误上下文，并锁死引擎。
      */
@@ -327,7 +320,9 @@ public class SimulationEngine implements InitializingBean {
                 if (sameTimeEventCount > maxEventsPerTimestamp) {
                     String errorMsg = String.format("仿真死循环检测: 时间戳 %d 发生死循环（超过 %d 个零耗时事件）",
                             lastProcessedTime, maxEventsPerTimestamp);
-                    errorLog.recordDeadLoopError(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp, errorMsg);
+
+                    // 修复: 使用 SimulationErrorLog 中定义的 recordDeadLoop 方法
+                    errorLog.recordDeadLoop(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp);
 
                     // 死循环也视为严重错误 触发暂停
                     triggerGlobalSuspend(nextEvent);
@@ -348,6 +343,7 @@ public class SimulationEngine implements InitializingBean {
             context.setSimTime(targetSimTime);
         }
     }
+
 // 内部handler类 实现接口 处理特定类型的事件
 
     /**
@@ -363,13 +359,23 @@ public class SimulationEngine implements InitializingBean {
             String fenceId = event.getPrimarySubject("FENCE");
             Fence fence = context.getFenceMap().get(fenceId);
             if (fence != null) {
-                FenceStateEnum status = (FenceStateEnum) event.getData();
-                fence.setStatus(status.getCode());
-                // 如果围栏变为通过状态，清空等待队列
-                if (FenceStateEnum.PASSABLE.equals(status)) {
-                    fence.getWaitingTrucks().clear();
+                // 修复: 栅栏状态是 String 类型
+                Object data = event.getData();
+                String status = null;
+                if (data instanceof FenceStateEnum) {
+                    status = ((FenceStateEnum) data).getCode();
+                } else if (data instanceof String) {
+                    status = (String) data;
                 }
-                log.info("栅栏 {} 状态已更新为: {}", fenceId, status.getDesc());
+
+                if (status != null) {
+                    fence.setStatus(status);
+                    // 如果围栏变为通过状态，清空等待队列
+                    if (FenceStateEnum.PASSABLE.getCode().equals(status)) {
+                        fence.getWaitingTrucks().clear();
+                    }
+                    log.info("栅栏 {} 状态已更新为: {}", fenceId, status);
+                }
             }
         }
     }
@@ -597,24 +603,29 @@ public class SimulationEngine implements InitializingBean {
     /**
      * 围栏命令转换处理器
      * 将 CMD_FENCE_TOGGLE 转换为 FENCE_CONTROL 事件
-     * 修复: 兼容 Map 类型参数，避免空指针异常
+     * 修复: 兼容 Map 类型参数，避免空指针异常，并修正类型匹配问题
      */
     @org.springframework.stereotype.Component
     public static class CmdFenceHandler implements SimEventHandler {
         @Override
         public EventTypeEnum getType() { return EventTypeEnum.CMD_FENCE_TOGGLE; }
         @Override
+        @SuppressWarnings("unchecked")
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
-            // 修复: 兼容处理
             String fenceId = null;
-            Integer status = null;
+            // 修复: 栅栏状态 Fence.status 是 String 类型，不要强制转换成 Integer
+            String status = null;
 
             if (event.getData() instanceof Map) {
                 Map<String, Object> map = (Map<String, Object>) event.getData();
                 fenceId = (String) map.get("nodeId");
-                status = (Integer) map.get("status");
-            } else if (event.getData() instanceof Integer) {
-                status = (Integer) event.getData();
+                // 处理可能传入的是 Integer (JSON反序列化) 或 String
+                Object statusObj = map.get("status");
+                if (statusObj != null) {
+                    status = String.valueOf(statusObj);
+                }
+            } else if (event.getData() instanceof String) {
+                status = (String) event.getData();
             } else if (event.getData() instanceof FenceStateEnum) {
                 status = ((FenceStateEnum) event.getData()).getCode();
             }
@@ -722,12 +733,14 @@ public class SimulationEngine implements InitializingBean {
 
                     if (!allowedFetch) {
                         // 如果业务类型需要抓箱但当前设备不匹配 记录错误
-                        if (bizType != null && common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
+                        // 修复: 移除不必要的 null 检查，requiresFetchDevice 内部已处理 null
+                        if (common.util.BizTypeUtil.requiresFetchDevice(bizType)) {
                             if (!isPutDevice || wi.getCarryCheId() == null) {
                                 log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备", deviceId, wiRefNo);
                             }
                         }
-                        if (!allowedFetch) return;
+                        // 修复: 移除冗余的 if (!allowedFetch) 判断，直接返回
+                        return;
                     }
 
                     // 移动集装箱 位置变为当前设备ID（表示箱子在设备上）
@@ -801,7 +814,8 @@ public class SimulationEngine implements InitializingBean {
                                         deviceId, container.getContainerId(), oldPos, wi.getCarryCheId());
                             }
                         }
-                    } else if (bizType != null && common.util.BizTypeUtil.requiresPutDevice(bizType)) {
+                        // 修复: 移除不必要的 null 检查，requiresPutDevice 内部已处理 null
+                    } else if (common.util.BizTypeUtil.requiresPutDevice(bizType)) {
                         log.warn("事件[PUT_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱/放箱设备", deviceId, wiRefNo);
                     }
                 }
