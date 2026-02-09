@@ -206,7 +206,7 @@ public class SimulationEngine implements InitializingBean {
      * 通常由用户在前端点击“重置”或“重新开始”触发。
      */
     public synchronized void reset() {
-        eventQueue.clear();
+        eventQueue.clear(); // 【关键】必须清空队列
         eventIdMap.clear();
         suspendedBizTypes.clear();
         suspendedEventIds.clear();
@@ -597,6 +597,7 @@ public class SimulationEngine implements InitializingBean {
     /**
      * 围栏命令转换处理器
      * 将 CMD_FENCE_TOGGLE 转换为 FENCE_CONTROL 事件
+     * 修复: 兼容 Map 类型参数，避免空指针异常
      */
     @org.springframework.stereotype.Component
     public static class CmdFenceHandler implements SimEventHandler {
@@ -604,12 +605,26 @@ public class SimulationEngine implements InitializingBean {
         public EventTypeEnum getType() { return EventTypeEnum.CMD_FENCE_TOGGLE; }
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
-            String fenceId = event.getPrimarySubject("FENCE");
-            Fence fence = context.getFenceMap().get(fenceId);
-            if (fence != null) {
-                FenceStateEnum status = (FenceStateEnum) event.getData();
-                SimEvent ctrlEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.FENCE_CONTROL, status);
-                ctrlEvent.addSubject("FENCE", fenceId);
+            // 修复: 兼容处理
+            String fenceId = null;
+            Integer status = null;
+
+            if (event.getData() instanceof Map) {
+                Map<String, Object> map = (Map<String, Object>) event.getData();
+                fenceId = (String) map.get("nodeId");
+                status = (Integer) map.get("status");
+            } else if (event.getData() instanceof Integer) {
+                status = (Integer) event.getData();
+            } else if (event.getData() instanceof FenceStateEnum) {
+                status = ((FenceStateEnum) event.getData()).getCode();
+            }
+
+            if (fenceId != null) {
+                Fence f = context.getFenceMap().get(fenceId);
+                if (f != null && status != null) f.setStatus(status);
+            } else if (status != null) {
+                // 没指定ID就全改
+                for(Fence f : context.getFenceMap().values()) f.setStatus(status);
             }
         }
     }

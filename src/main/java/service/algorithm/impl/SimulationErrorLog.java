@@ -40,7 +40,9 @@ public class SimulationErrorLog {
         entry.setEventId(eventId);
         entry.setEventType(eventType);
         entry.setMessage(message);
-        entry.setCause(cause != null ? cause.getClass().getSimpleName() + ": " + cause.getMessage() : null);
+        if (cause != null) {
+            entry.setCause(cause.toString());
+        }
         entry.setEventChainSuspended(eventChainSuspended);
         entry.setTimestamp(System.currentTimeMillis());
 
@@ -48,13 +50,13 @@ public class SimulationErrorLog {
     }
 
     /**
-     * 记录死循环错误
+     * 记录死循环
      */
-    public synchronized void recordDeadLoopError(long simTime, int eventCount, int threshold, String message) {
+    public synchronized void recordDeadLoop(long simTime, int eventCount, int threshold) {
         ErrorLogEntry entry = new ErrorLogEntry();
         entry.setErrorType(ErrorType.DEAD_LOOP);
         entry.setSimTime(simTime);
-        entry.setMessage(message);
+        entry.setMessage(String.format("仿真死循环检测: 时间戳 %d 发生死循环（超过 %d 个零耗时事件）", simTime, threshold));
         entry.setEventCount(eventCount);
         entry.setThreshold(threshold);
         entry.setTimestamp(System.currentTimeMillis());
@@ -90,6 +92,13 @@ public class SimulationErrorLog {
     }
 
     /**
+     * 重置日志（测试用）
+     */
+    public synchronized void reset() {
+        errorBuffer.clear();
+    }
+
+    /**
      * 错误类型
      */
     public enum ErrorType {
@@ -108,9 +117,9 @@ public class SimulationErrorLog {
         private EventTypeEnum eventType;
         private String message;
         private String cause;
-        private Integer eventCount;
-        private Integer threshold;
+        private boolean eventChainSuspended;
+        private int eventCount;
+        private int threshold;
         private long timestamp;
-        private Boolean eventChainSuspended; // 事件链是否被暂停
     }
 }

@@ -37,4 +37,11 @@ public class SimulationEventLog {
         }
         return result;
     }
+
+    /**
+     * 重置日志（测试用）
+     */
+    public synchronized void reset() {
+        buffer.clear();
+    }
 }

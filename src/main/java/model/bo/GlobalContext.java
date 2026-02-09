@@ -18,8 +18,6 @@ public class GlobalContext {
 
     /**
      * 仿真世界的绝对时间戳
-     * 全局唯一的仿真时钟，所有事件都基于此时间戳进行调度和处理
-     * 时钟只能通过事件处理向前推进，确保离散仿真的时间一致性
      */
     @Setter
     private long simTime = 0L;
@@ -39,7 +37,7 @@ public class GlobalContext {
     private final Map<String, Fence> fenceMap = new ConcurrentHashMap<>();
     // 存储堆场箱区配置
     private final Map<String, YardBlock> yardBlockMap = new ConcurrentHashMap<>();
-    // 存储充电桩资源
+    // 存储充电桩
     private final Map<String, ChargingStation> chargingStationMap = new ConcurrentHashMap<>();
 
     //  业务流转数据
@@ -71,7 +69,6 @@ public class GlobalContext {
 
     /**
      * 根据设备ID获取具体的设备基类
-     * 单次查找，避免 containsKey + get 的二次查找
      */
     public BaseDevice getDevice(String deviceId) {
         if (deviceId == null) return null;
@@ -83,10 +80,10 @@ public class GlobalContext {
     }
 
     /**
-     * 场景重置
+     * 场景重置 - 彻底清空所有数据
      */
-    @SuppressWarnings("unused")
     public void clearAll() {
+        this.simTime = 0L;
         truckMap.clear();
         qcMap.clear();
         ascMap.clear();
@@ -96,7 +93,5 @@ public class GlobalContext {
         chargingStationMap.clear();
         workInstructionMap.clear();
         containerMap.clear();
-        simTime = 0L;
     }
-
 }
