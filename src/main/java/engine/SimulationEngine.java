@@ -488,12 +488,21 @@ public class SimulationEngine implements InitializingBean {
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
-            if(id==null) id = event.getPrimarySubject("CRANE");
+            String role = "TRUCK"; // 默认角色
+
+            if(id == null) {
+                id = event.getPrimarySubject("CRANE");
+                role = "CRANE";
+            }
+
             BaseDevice d = context.getDevice(id);
             if(d != null) {
                 d.onArrival((Point)event.getData(), context.getSimTime(), engine, event.getEventId());
                 SimEvent reportEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.REPORT_IDLE, null);
-                reportEvent.addSubject(d.getType() == DeviceTypeEnum.ASC || d.getType() == DeviceTypeEnum.QC ? "CRANE" : "TRUCK", id);
+                // 修复：优先使用传入事件的 Role，避免重新推断类型时出错；同时增加双重保障
+                if (id != null) {
+                    reportEvent.addSubject(role, id);
+                }
             }
         }
     }
@@ -510,7 +519,13 @@ public class SimulationEngine implements InitializingBean {
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             String id = event.getPrimarySubject("TRUCK");
             if(id==null) id = event.getPrimarySubject("CRANE");
-            log.info("设备 {} 动作结束，当前空闲", id);
+            if(id==null) id = event.getPrimarySubject("DEVICE"); // 增加兜底
+
+            if (id != null) {
+                log.info("设备 {} 动作结束，当前空闲", id);
+            } else {
+                log.warn("收到空闲上报事件，但无法识别设备ID。EventID: {}", event.getEventId());
+            }
         }
     }
 

@@ -71,32 +71,33 @@ public abstract class BaseDevice {
         double arrivalThreshold = GlobalContext.getInstance()
                 .getPhysicsConfig()
                 .getArrivalThreshold();
-        if (GisUtil.getDistance(currentPos, currentTargetPos) <= arrivalThreshold) {
-            // 已经在位置上了 直接触发到达
-            onArrival(currentTargetPos, now, engine, parentEventId);
-            return;
+
+        // 修复：即使已经在位置上，也不要直接调用 onArrival，而是调度一个立即执行的 ARRIVAL 事件
+        // 这样可以确保 SimulationEngine 中的 ArrivalHandler 被触发，从而正确生成 REPORT_IDLE 事件并记录日志
+        long travelTimeMS = 0;
+
+        if (GisUtil.getDistance(currentPos, currentTargetPos) > arrivalThreshold) {
+            //  围栏检查
+            Fence blockingFence = getBlockingFence(currentTargetPos);
+            if (blockingFence != null) {
+                this.state = DeviceStateEnum.WAITING;
+                blockingFence.getWaitingTrucks().add(this.id); // 加入围栏等待队列
+                return;
+            }
+
+            //  移动
+            double actualSpeed = applyFenceSpeedLimit(this.speed, currentTargetPos);
+
+            // 更新状态
+            this.state = DeviceStateEnum.MOVING;
+            this.lastStartPos = currentPos;
+            this.lastMoveStartTime = now;
+
+            // 计算物理耗时
+            travelTimeMS = GisUtil.calculateTravelTimeMS(currentPos, currentTargetPos, actualSpeed);
         }
 
-        //  围栏检查
-        Fence blockingFence = getBlockingFence(currentTargetPos);
-        if (blockingFence != null) {
-            this.state = DeviceStateEnum.WAITING;
-            blockingFence.getWaitingTrucks().add(this.id); // 加入围栏等待队列
-            return;
-        }
-
-        //  移动
-        double actualSpeed = applyFenceSpeedLimit(this.speed, currentTargetPos);
-
-        // 更新状态
-        this.state = DeviceStateEnum.MOVING;
-        this.lastStartPos = currentPos;
-        this.lastMoveStartTime = now;
-
-        // 计算物理耗时
-        long travelTimeMS = GisUtil.calculateTravelTimeMS(currentPos, currentTargetPos, actualSpeed);
-
-        // 调度到达事件
+        // 调度到达事件 (即使耗时为0也调度，保持事件链完整)
         SimEvent arrivalEvent = engine.scheduleEvent(parentEventId, now + travelTimeMS, EventTypeEnum.ARRIVAL, currentTargetPos);
 
         // 标记事件主体

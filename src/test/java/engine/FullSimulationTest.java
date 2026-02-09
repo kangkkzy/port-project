@@ -56,6 +56,9 @@ class FullSimulationTest {
 
     private GlobalContext context;
 
+    // 静态变量，用于在所有测试方法间共享同一个日志文件路径
+    private static File sharedLogFile = null;
+
     @BeforeEach
     void setUp() {
         context = GlobalContext.getInstance();
@@ -68,58 +71,64 @@ class FullSimulationTest {
     }
 
     /**
-     * 测试结束后，将仿真日志落库到指定文件
+     * 测试结束后，将仿真日志追加写入到同一个文件
      */
     @AfterEach
     void saveTestLogs(TestInfo testInfo) {
-        // 定义日志目录
-        String baseDir = "D:\\A大湾区\\test";
-        File dir = new File(baseDir);
-        if (!dir.exists()) {
-            boolean mk = dir.mkdirs();
-            if (!mk) {
-                System.err.println("无法创建日志目录: " + baseDir);
-                return;
+        // 1. 初始化日志文件（仅在第一次执行时创建）
+        if (sharedLogFile == null) {
+            String baseDir = "D:\\A大湾区\\test";
+            File dir = new File(baseDir);
+            if (!dir.exists()) {
+                dir.mkdirs();
             }
+            // 使用 类名_时间戳 作为文件名，代表这整次测试运行
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            String fileName = String.format("FullSimulationTest_Run_%s.log", timestamp);
+            sharedLogFile = new File(dir, fileName);
+            System.out.println(">>> 本次测试日志将统一汇总至: " + sharedLogFile.getAbsolutePath());
         }
 
-        // 生成文件名：测试方法名_时间戳.log
-        String methodName = testInfo.getDisplayName().replaceAll("[\\\\/:*?\"<>|]", "_"); // 替换非法文件名字符
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        String fileName = String.format("%s_%s.log", methodName, timestamp);
-        File logFile = new File(dir, fileName);
+        // 2. 追加写入日志
+        // 使用 try-with-resources 自动关闭流，append=true 表示追加模式
+        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(sharedLogFile, true), StandardCharsets.UTF_8))) {
 
-        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(logFile), StandardCharsets.UTF_8))) {
-            writer.println("========== 测试信息 ==========");
-            writer.println("测试方法: " + testInfo.getDisplayName());
-            writer.println("记录时间: " + LocalDateTime.now());
-            writer.println("仿真最终时间: " + context.getSimTime());
+            // 写入明显的分隔符
+            writer.println();
+            writer.println("#################################################################");
+            writer.println("### 测试用例: " + testInfo.getDisplayName());
+            writer.println("### 记录时间: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss.SSS")));
+            writer.println("### 仿真结束时间: " + context.getSimTime());
+            writer.println("#################################################################");
             writer.println();
 
-            writer.println("========== 错误日志 (SimulationErrorLog) ==========");
+            // 写入错误日志
+            writer.println(">>> 错误日志 (SimulationErrorLog):");
             List<SimulationErrorLog.ErrorLogEntry> errors = errorLog.listAll();
             if (errors.isEmpty()) {
                 writer.println("(无错误)");
             } else {
                 for (SimulationErrorLog.ErrorLogEntry err : errors) {
-                    writer.printf("[%d] %s - %s (Cause: %s)%n",
+                    writer.printf("[SimTime: %d] [Type: %s] %s (Cause: %s)%n",
                             err.getSimTime(), err.getErrorType(), err.getMessage(), err.getCause());
                 }
             }
             writer.println();
 
-            writer.println("========== 事件日志 (SimulationEventLog) ==========");
+            // 写入事件日志
+            writer.println(">>> 事件流日志 (SimulationEventLog):");
             List<model.dto.snapshot.EventLogEntryDto> events = eventLog.listSince(0);
             if (events.isEmpty()) {
                 writer.println("(无事件)");
             } else {
                 for (model.dto.snapshot.EventLogEntryDto evt : events) {
-                    writer.printf("[%d] %s (ID: %s) Subjects: %s%n",
+                    // 格式化输出：时间对齐，事件类型对齐，方便阅读
+                    writer.printf("[%8d] %-25s | ID: %-36s | Subj: %s%n",
                             evt.getSimTime(), evt.getType(), evt.getEventId(), evt.getSubjects());
                 }
             }
-
-            System.out.println("测试日志已保存至: " + logFile.getAbsolutePath());
+            writer.println();
+            writer.println("-----------------------------------------------------------------"); // 结束线
 
         } catch (Exception e) {
             System.err.println("保存测试日志失败: " + e.getMessage());
@@ -366,36 +375,90 @@ class FullSimulationTest {
     }
 
     /**
-     * 测试3: 所有业务类型基本流程 (参数化测试)
+     * 测试3: 所有业务类型基本流程 (参数化测试) - 深度验证版
+     * 修正：原测试仅验证了任务绑定，未验证实际作业逻辑。
+     * 现增加设备实际动作（吊具抓箱或集卡移动），确保业务类型配置在物理仿真层面有效。
      */
     @ParameterizedTest
     @EnumSource(BizTypeEnum.class)
-    @DisplayName("测试所有业务类型流程")
+    @DisplayName("测试所有业务类型流程-深度验证")
     void testAllBusinessTypes(BizTypeEnum bizType) {
         // 重置上下文
         context.clearAll();
         engine.reset();
 
-        String wiRefNo = "WI_" + bizType.getCode();
-        WorkInstruction wi = createWorkInstruction(wiRefNo, "CONTAINER_" + bizType.getCode(), bizType);
-        context.getWorkInstructionMap().put(wiRefNo, wi);
-
-        Container container = createContainer("CONTAINER_" + bizType.getCode(), wi.getFromPos());
-        context.getContainerMap().put(container.getContainerId(), container);
-
+        // 1. 准备环境
+        // 使用明确的ID，避免自动生成的ID不可控
+        String deviceId = "DEV_" + bizType.getCode();
         BaseDevice device = createDeviceForBizType(bizType);
+        device.setId(deviceId);
         addDeviceToContext(device);
 
+        String wiRefNo = "WI_" + bizType.getCode();
+        String containerId = "CNT_" + bizType.getCode();
+
+        WorkInstruction wi = createWorkInstruction(wiRefNo, containerId, bizType);
+
+        // 关键配置：将设备配置为该指令的执行者，否则后续操作会被拒绝
+        if (device.getType() == DeviceTypeEnum.QC || device.getType() == DeviceTypeEnum.ASC) {
+            wi.setFetchCheId(deviceId); // 吊具负责抓箱
+        } else {
+            wi.setCarryCheId(deviceId); // 集卡负责运输
+        }
+        context.getWorkInstructionMap().put(wiRefNo, wi);
+
+        // 确保集装箱在起始位置（如果是吊具抓箱，箱子要在FromPos）
+        Container container = createContainer(containerId, wi.getFromPos());
+        context.getContainerMap().put(containerId, container);
+
+        // 2. 指派任务 (第一阶段验证)
         Map<String, Object> assignPayload = new HashMap<>();
         assignPayload.put("wiRefNo", wiRefNo);
         SimEvent assignEvent = engine.scheduleEvent(null, 0, EventTypeEnum.CMD_ASSIGN_TASK, assignPayload);
-        assignEvent.addSubject("DEVICE", device.getId());
+        assignEvent.addSubject("DEVICE", deviceId);
 
         engine.runUntil(100);
 
+        // 验证绑定成功
         assertEquals(wiRefNo, device.getCurrWiRefNo(),
-                String.format("业务类型 %s 的设备应该绑定任务", bizType.getDesc()));
-        assertNotNull(BizTypeUtil.getFullDescription(bizType), "业务类型应该有描述");
+                String.format("业务类型[%s]下，设备应成功绑定工单", bizType));
+
+        // 3. 执行实际动作（第二阶段验证 - 拒绝虚假空转）
+        if (device.getType() == DeviceTypeEnum.QC || device.getType() == DeviceTypeEnum.ASC) {
+            // == 吊具测试流程：抓箱 ==
+            CraneOperationReq opReq = new CraneOperationReq();
+            opReq.setCraneId(deviceId);
+            opReq.setAction(EventTypeEnum.FETCH_DONE);
+            opReq.setDurationMS(2000); // 动作耗时2秒
+
+            engine.scheduleEvent(null, 200, EventTypeEnum.CMD_CRANE_OP, opReq)
+                    .addSubject("CRANE", deviceId);
+
+            // 推进足够的时间 (200 + 2000 = 2200)
+            engine.runUntil(3000);
+
+            // 深度验证：箱子是否真的被抓起来了
+            assertEquals(deviceId, container.getCurrentPos(),
+                    String.format("业务类型[%s]下，吊具应能成功执行抓箱动作，箱子位置应更新为设备ID", bizType));
+
+        } else {
+            // == 集卡测试流程：移动 ==
+            Map<String, Object> movePayload = new HashMap<>();
+            movePayload.put("target", new Point(100.0, 0.0));
+            movePayload.put("speed", 10.0); // 10m/s
+
+            engine.scheduleEvent(null, 200, EventTypeEnum.CMD_MOVE, movePayload)
+                    .addSubject("TRUCK", deviceId);
+
+            // 移动100米需要10秒 => 10000ms
+            engine.runUntil(12000);
+
+            // 深度验证：是否到达目标附近
+            assertEquals(100.0, device.getPosX(), 0.1,
+                    String.format("业务类型[%s]下，集卡应能成功执行移动指令", bizType));
+            assertEquals(DeviceStateEnum.IDLE, device.getState(),
+                    String.format("业务类型[%s]下，移动结束后应恢复IDLE", bizType));
+        }
     }
 
     /**
