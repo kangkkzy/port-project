@@ -301,6 +301,7 @@ public class SimulationEngine implements InitializingBean {
         int sameTimeEventCount = 0;
         long lastProcessedTime = -1L;
         int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp();
+        long currentTime = context.getSimTime(); // 记录当前时间
 
         while (!eventQueue.isEmpty()) {
             // 每次循环前检查暂停状态
@@ -311,7 +312,12 @@ public class SimulationEngine implements InitializingBean {
 
             SimEvent nextEvent = eventQueue.peek();
             if (nextEvent.getTriggerTime() > targetSimTime) {
-                break; // 已达到目标时间 停止
+                // 下一个事件的时间已经超过目标时间，停止处理
+                // 时钟应该更新到目标时间（因为我们已经推进到了目标时间）
+                if (!globalSuspended && targetSimTime > currentTime) {
+                    context.setSimTime(targetSimTime);
+                }
+                break;
             }
 
             //  死循环保护机制
@@ -336,10 +342,13 @@ public class SimulationEngine implements InitializingBean {
             // 取出并执行
             eventQueue.poll();
             processEvent(nextEvent);
+            // processEvent 内部已经更新了时钟到事件触发时间
+            currentTime = context.getSimTime();
         }
 
-        // 只有正常结束才更新时钟到目标时间 避免界面时间跳变
-        if (!globalSuspended) {
+        // 如果队列为空且没有暂停，且目标时间大于当前时间，才更新到目标时间
+        // 这样可以避免在没有事件时错误地推进时钟
+        if (!globalSuspended && eventQueue.isEmpty() && targetSimTime > currentTime) {
             context.setSimTime(targetSimTime);
         }
     }
@@ -642,7 +651,7 @@ public class SimulationEngine implements InitializingBean {
 
     /**
      * 吊具移动处理器
-     * 计算移动时间（水平/垂直），调度 ARRIVAL 事件
+     * 设置目标位置和速度，然后调度 MOVE_START 事件（与 CmdMoveHandler 保持一致）
      */
     @org.springframework.stereotype.Component
     public static class CmdCraneMoveHandler implements SimEventHandler {
@@ -659,13 +668,10 @@ public class SimulationEngine implements InitializingBean {
             Double speed = (Double) payload.get("speed");
             if (speed == null || speed <= 0) throw new BusinessException("speed无效");
             double distance = req.getDistance() != null ? req.getDistance() : 0;
-            long travelTimeMS = (long) ((distance / speed) * 1000);
-
-            device.setState(req.getMoveType());
-            double posX = device.getPosX() != null ? device.getPosX() : 0;
-            double posY = device.getPosY() != null ? device.getPosY() : 0;
 
             // 计算新的坐标点
+            double posX = device.getPosX() != null ? device.getPosX() : 0;
+            double posY = device.getPosY() != null ? device.getPosY() : 0;
             Point targetPoint;
             if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
                 targetPoint = new Point(posX + distance, posY);
@@ -675,8 +681,14 @@ public class SimulationEngine implements InitializingBean {
                 targetPoint = new Point(posX + distance, posY);
             }
 
-            SimEvent arrEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + travelTimeMS, EventTypeEnum.ARRIVAL, targetPoint);
-            arrEvent.addSubject("CRANE", device.getId());
+            // 设置设备的目标位置和速度（与 CmdMoveHandler 保持一致）
+            device.setSpeed(speed);
+            device.setCurrentTargetPos(targetPoint);
+
+            // 调度 MOVE_START 事件，让 onMoveStart 方法计算实际的到达时间
+            // 这样可以统一处理围栏检查、速度限制等逻辑
+            SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
+            moveStart.addSubject("CRANE", craneId);
         }
     }
 
