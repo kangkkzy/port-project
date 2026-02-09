@@ -274,8 +274,8 @@ public class SimulationEngine implements InitializingBean {
                 handler.handle(nextEvent, this, context);
             } catch (Exception e) {
                 //  异常熔断逻辑
-                String errorMsg = String.format("事件处理异常，引擎全局暂停: Type=%s, Id=%s, Time=%d",
-                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime());
+                String errorMsg = String.format("事件处理异常，引擎全局暂停: Type=%s, Id=%s, Time=%d, Error=%s",
+                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime(), e.getMessage());
 
                 // 记录错误日志
                 errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
@@ -447,6 +447,12 @@ public class SimulationEngine implements InitializingBean {
             String truckId = event.getPrimarySubject("TRUCK");
             BaseDevice device = context.getDevice(truckId);
             if (device == null) throw new BusinessException("移动指令异常: 设备不存在");
+
+            // 状态校验：如果在作业中，不能移动
+            if (device.getState() == DeviceStateEnum.WORKING || device.getState() == DeviceStateEnum.CHARGING) {
+                throw new BusinessException(String.format("设备 %s 当前状态为 %s，无法执行移动指令", device.getId(), device.getState()));
+            }
+
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             Double speed = (Double) payload.get("speed");
             Point target = (Point) payload.get("target");
@@ -678,6 +684,12 @@ public class SimulationEngine implements InitializingBean {
             String craneId = event.getPrimarySubject("CRANE");
             BaseDevice device = context.getDevice(craneId);
             if (device == null) return;
+
+            // 状态校验：作业中不可移动
+            if (device.getState() == DeviceStateEnum.WORKING) {
+                throw new BusinessException(String.format("设备 %s 正在作业中，无法执行移动指令", craneId));
+            }
+
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             CraneMoveReq req = (CraneMoveReq) payload.get("req");
             Double speed = (Double) payload.get("speed");
@@ -718,9 +730,21 @@ public class SimulationEngine implements InitializingBean {
         @Override
         public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
             CraneOperationReq req = (CraneOperationReq) event.getData();
+            String craneId = req.getCraneId();
+            BaseDevice device = context.getDevice(craneId);
+
+            // 【核心修复】状态校验：移动中不可作业，防止“边跑边抓”
+            if (device != null) {
+                if (device.getState() == DeviceStateEnum.MOVING) {
+                    throw new BusinessException(String.format("逻辑错误：设备 %s 正在移动中，无法执行抓/放箱操作！", craneId));
+                }
+                // 锁定状态为作业中
+                device.setState(DeviceStateEnum.WORKING);
+            }
+
             // 调度操作完成事件（例如 FETCH_DONE 或 PUT_DONE）
             SimEvent opEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime() + req.getDurationMS(), req.getAction(), null);
-            opEvent.addSubject("CRANE", req.getCraneId());
+            opEvent.addSubject("CRANE", craneId);
         }
     }
 
@@ -737,6 +761,9 @@ public class SimulationEngine implements InitializingBean {
             String deviceId = event.getPrimarySubject("CRANE");
             BaseDevice device = context.getDevice(deviceId);
             if (device != null) {
+                // 【核心修复】作业结束，恢复为空闲状态，以便接受移动指令
+                device.setState(DeviceStateEnum.IDLE);
+
                 String wiRefNo = device.getCurrWiRefNo();
                 if (wiRefNo == null) {
                     log.warn("事件[FETCH_DONE]: 设备 [{}] 未绑定作业指令，跳过处理", deviceId);
@@ -766,8 +793,29 @@ public class SimulationEngine implements InitializingBean {
                                 log.warn("事件[FETCH_DONE]: 设备 [{}] 不是指令 [{}] 的抓箱设备", deviceId, wiRefNo);
                             }
                         }
-                        // 修复: 移除冗余的 if (!allowedFetch) 判断，直接返回
                         return;
+                    }
+
+                    // 【核心修复】增加物理距离校验，防止隔空抓箱
+                    if (wi.getCarryCheId() != null) {
+                        Container c = context.getContainerMap().get(wi.getContainerId());
+                        // 如果箱子当前在集卡上，说明是“设备从集卡抓”的操作
+                        if (c != null && c.getCurrentPos().equals(wi.getCarryCheId())) {
+                            BaseDevice truck = context.getDevice(wi.getCarryCheId());
+                            if (truck != null) {
+                                double dist = GisUtil.getDistance(
+                                        new Point(device.getPosX(), device.getPosY()),
+                                        new Point(truck.getPosX(), truck.getPosY())
+                                );
+                                // 允许误差 5米
+                                if (dist > 5.0) {
+                                    log.error("严重逻辑错误: 设备 [{}] 试图从集卡 [{}] 抓箱，但物理距离过远 ({:.2f}m)。指令: {}",
+                                            deviceId, truck.getId(), dist, wiRefNo);
+                                    // 距离过远，操作失败，直接返回
+                                    return;
+                                }
+                            }
+                        }
                     }
 
                     // 移动集装箱 位置变为当前设备ID（表示箱子在设备上）
@@ -804,7 +852,9 @@ public class SimulationEngine implements InitializingBean {
             String deviceId = event.getPrimarySubject("CRANE");
             BaseDevice device = context.getDevice(deviceId);
             if (device != null) {
+                // 【核心修复】作业结束，恢复IDLE
                 device.setState(DeviceStateEnum.IDLE);
+
                 String wiRefNo = device.getCurrWiRefNo();
                 if (wiRefNo == null) {
                     log.warn("事件[PUT_DONE]: 设备 [{}] 未绑定作业指令，跳过处理", deviceId);
@@ -832,6 +882,21 @@ public class SimulationEngine implements InitializingBean {
 
                         // 情况2：当前是抓箱设备，且要把箱子放到集卡上（中转流程）
                     } else if (isFetchDevice && wi.getCarryCheId() != null) {
+
+                        // 【核心修复】增加物理距离校验，防止隔空放箱
+                        BaseDevice truck = context.getDevice(wi.getCarryCheId());
+                        if (truck != null) {
+                            double dist = GisUtil.getDistance(
+                                    new Point(device.getPosX(), device.getPosY()),
+                                    new Point(truck.getPosX(), truck.getPosY())
+                            );
+                            if (dist > 5.0) {
+                                log.error("严重逻辑错误: 设备 [{}] 试图放箱到集卡 [{}]，但物理距离过远 ({:.2f}m)。指令: {}",
+                                        deviceId, truck.getId(), dist, wiRefNo);
+                                return;
+                            }
+                        }
+
                         if (wi.getContainerId() != null) {
                             Container container = context.getContainerMap().get(wi.getContainerId());
                             if (container != null) {
