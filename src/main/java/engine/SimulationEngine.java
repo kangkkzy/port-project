@@ -413,7 +413,8 @@ public class SimulationEngine implements InitializingBean {
 
     /**
      * 任务确认处理器
-     * 设备确认接收任务 绑定指令号 状态置为 WORKING。
+     * 设备确认接收任务 绑定指令号
+     * 【修正】：任务绑定不代表开始作业，不应立即设为 WORKING，否则无法执行后续的移动指令。
      */
     @org.springframework.stereotype.Component
     public static class CmdTaskAckHandler implements SimEventHandler {
@@ -427,9 +428,14 @@ public class SimulationEngine implements InitializingBean {
             if (device == null) return;
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             device.setCurrWiRefNo((String) payload.get("wiRefNo"));
-            if (device.getType() == DeviceTypeEnum.ASC || device.getType() == DeviceTypeEnum.QC) {
+
+            // 【逻辑修复】 移除状态设置。
+            // 收到指令后设备仍应处于 IDLE (或之前状态)，直到显式的 CMD_MOVE 或 CMD_CRANE_OP 事件触发状态变更。
+            // 这样可以避免 "Working device cannot move" 的异常。
+            /* if (device.getType() == DeviceTypeEnum.ASC || device.getType() == DeviceTypeEnum.QC) {
                 device.setState(DeviceStateEnum.WORKING);
             }
+            */
         }
     }
 
@@ -455,6 +461,11 @@ public class SimulationEngine implements InitializingBean {
 
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             Double speed = (Double) payload.get("speed");
+            // 【修正】增加非法参数校验
+            if (speed == null || speed <= 0) {
+                throw new BusinessException(String.format("非法移动参数: speed=%s", speed));
+            }
+
             Point target = (Point) payload.get("target");
             device.setSpeed(speed);
             device.setCurrentTargetPos(target);
@@ -693,7 +704,10 @@ public class SimulationEngine implements InitializingBean {
             Map<String, Object> payload = (Map<String, Object>) event.getData();
             CraneMoveReq req = (CraneMoveReq) payload.get("req");
             Double speed = (Double) payload.get("speed");
-            if (speed == null || speed <= 0) throw new BusinessException("speed无效");
+            // 【修正】增加非法参数校验
+            if (speed == null || speed <= 0) {
+                throw new BusinessException("speed无效");
+            }
             double distance = req.getDistance() != null ? req.getDistance() : 0;
 
             // 计算新的坐标点

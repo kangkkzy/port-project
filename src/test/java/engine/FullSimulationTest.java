@@ -447,6 +447,8 @@ class FullSimulationTest {
 
     /**
      * 测试7: 设备状态管理
+     * 【更新】：CMD_ASSIGN_TASK 不再直接改变状态为 WORKING，
+     * 需要触发 CMD_CRANE_OP 后状态才会变为 WORKING。
      */
     @Test
     @DisplayName("测试设备状态管理")
@@ -464,6 +466,17 @@ class FullSimulationTest {
         assignEvent.addSubject("DEVICE", "QC01");
 
         engine.runUntil(100);
+        // 注意：修复Bug后，AssignTask不再立即设置WORKING，需要开始操作
+        // assertEquals(DeviceStateEnum.WORKING, qc.getState());
+
+        // 调度一个操作来验证状态变化
+        CraneOperationReq opReq = new CraneOperationReq();
+        opReq.setCraneId("QC01");
+        opReq.setAction(EventTypeEnum.FETCH_DONE);
+        opReq.setDurationMS(1000);
+        engine.scheduleEvent(null, 200, EventTypeEnum.CMD_CRANE_OP, opReq).addSubject("CRANE", "QC01");
+
+        engine.runUntil(300);
         assertEquals(DeviceStateEnum.WORKING, qc.getState());
     }
 
@@ -676,8 +689,12 @@ class FullSimulationTest {
 
         Container container = createContainer("CONTAINER001", "YARD001");
         context.getContainerMap().put("CONTAINER001", container);
-        context.getAscMap().put("ASC01", createAscDevice("ASC01"));
-        context.getTruckMap().put("TRUCK01", createTruck("TRUCK01"));
+        context.getAscMap().put("ASC01", createAscDevice("ASC01")); // 默认在 0.0
+
+        // 【关键修正】将集卡放在 ASC 即将到达的位置 5.0，确保物理距离校验通过
+        Truck truck = createTruck("TRUCK01");
+        truck.setPosX(5.0); truck.setPosY(0.0);
+        context.getTruckMap().put("TRUCK01", truck);
 
         // 1. 指派任务 & 移动 (耗时 2500ms -> 到达 2600ms)
         Map<String, Object> assignPayload = new HashMap<>(); assignPayload.put("wiRefNo", "WI001");
@@ -688,7 +705,7 @@ class FullSimulationTest {
         Map<String, Object> movePayload = new HashMap<>(); movePayload.put("req", moveReq); movePayload.put("speed", 2.0);
         engine.scheduleEvent(null, 100, EventTypeEnum.CMD_CRANE_MOVE, movePayload).addSubject("CRANE", "ASC01");
 
-        // 2. 抓箱 (推迟到 3000ms)
+        // 2. 抓箱 (推迟到 3000ms，确保 ASC 已到达 2600ms)
         CraneOperationReq opReq = new CraneOperationReq();
         opReq.setCraneId("ASC01"); opReq.setDurationMS(1000); opReq.setAction(EventTypeEnum.FETCH_DONE);
         engine.scheduleEvent(null, 3000, EventTypeEnum.CMD_CRANE_OP, opReq).addSubject("CRANE", "ASC01");
@@ -754,8 +771,14 @@ class FullSimulationTest {
 
         Container container = createContainer("CONTAINER001", "TRUCK01");
         context.getContainerMap().put("CONTAINER001", container);
-        context.getQcMap().put("QC01", createQcDevice("QC01"));
-        context.getTruckMap().put("TRUCK01", createTruck("TRUCK01"));
+
+        context.getQcMap().put("QC01", createQcDevice("QC01")); // 默认 0.0
+
+        // 【关键修正】集卡放在 QC 移动的目标点 5.0
+        Truck truck = createTruck("TRUCK01");
+        truck.setPosX(5.0); truck.setPosY(0.0);
+        context.getTruckMap().put("TRUCK01", truck);
+
 
         // 1. 指派任务
         Map<String, Object> assignPayload = new HashMap<>();
@@ -874,13 +897,17 @@ class FullSimulationTest {
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("target", new Point(100.0, 100.0));
-        payload.put("speed", -5.0);
+        payload.put("speed", -5.0); // 非法速度
 
+        // 调度事件，预期 Engine 在处理时会抛异常并记录到 ErrorLog
         engine.scheduleEvent(null, 0, EventTypeEnum.CMD_MOVE, payload).addSubject("TRUCK", "TRUCK_ERR");
-        try { engine.stepNextEvent(); } catch (Exception e) {}
 
+        // 运行，此时应该触发全局暂停
+        engine.runUntil(100);
+
+        // 验证错误日志是否存在
         List<SimulationErrorLog.ErrorLogEntry> errors = errorLog.listSince(0);
-        assertFalse(errors.isEmpty());
+        assertFalse(errors.isEmpty(), "应该记录参数非法的错误日志");
     }
 
     @Test
