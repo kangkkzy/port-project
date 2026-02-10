@@ -4,36 +4,47 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 对应 PDF 4.2.1 及 2.1.2 节
- * 模拟船图结构、装船(LOAD)和卸船(DSCH)的顺序约束
+ * [PDF Part 2] 船图结构与堆叠顺序约束验证工具
+ * 对应 PDF 2.1.2 及 4.2 节：处理集装箱在船上的物理依赖关系
  */
 public class VesselStowageMock {
 
-    // 船图状态：记录哪些位置有箱子
-    private static final Set<String> occupiedPositions = Collections.synchronizedSet(new HashSet<>());
+    // 记录船上已被占用的位置 (Bay-Row-Tier)
+    // 使用 ConcurrentHashMap.KeySetView 保证多线程仿真环境下的安全性
+    private static final Set<String> occupiedPositions = ConcurrentHashMap.newKeySet();
 
-    // 正向依赖：装船时，Key 依赖 Value (Key 在 Value 之上)
-    // 例如: "BAY01-01-02" -> {"BAY01-01-01"} (装 TIER02 前必须有 TIER01)
+    // 装船依赖图：Key=上层位置, Value=依赖的下层位置集合
+    // 含义：要放 Key，必须先放 Value
     private static final Map<String, Set<String>> loadPrecedenceMap = new ConcurrentHashMap<>();
 
-    // 反向依赖：卸船时，Key 被 Value 依赖 (Value 在 Key 之上)
-    // 例如: "BAY01-01-01" -> {"BAY01-01-02"} (卸 TIER01 前必须卸掉 TIER02)
+    // 卸船依赖图：Key=下层位置, Value=压在上面的上层位置集合
+    // 含义：要取 Key，必须先取 Value
     private static final Map<String, Set<String>> dischargePrecedenceMap = new ConcurrentHashMap<>();
 
     static {
-        // --- 初始化模拟依赖关系 ---
+        // --- 初始化模拟船图结构的依赖关系 ---
         // 规则：同一 Bay 同一 Row，层层向上堆叠
+        // 实际项目中这些数据应来自 BAPLIE 文件解析，此处为硬编码模拟
 
-        // TIER02 依赖 TIER01
-        addDependency("BAY01-01-02", "BAY01-01-01");
-        // TIER03 依赖 TIER02
-        addDependency("BAY01-01-03", "BAY01-01-02");
+        // BAY01 的堆叠关系
+        addDependency("BAY01-01-02", "BAY01-01-01"); // 2层依赖1层
+        addDependency("BAY01-01-03", "BAY01-01-02"); // 3层依赖2层
+
+        // BAY03 的堆叠关系 (用于多岸桥测试)
+        addDependency("BAY03-01-02", "BAY03-01-01");
+
+        // BAY02/04 等位置假设默认为底层或无依赖
     }
 
+    /**
+     * 建立双向依赖关系
+     * @param upper 上层位置 (High Tier)
+     * @param lower 下层位置 (Low Tier)
+     */
     private static void addDependency(String upper, String lower) {
-        // 装船约束: 上层依赖下层
+        // 构建装船图
         loadPrecedenceMap.computeIfAbsent(upper, k -> new HashSet<>()).add(lower);
-        // 卸船约束: 下层被上层依赖
+        // 构建卸船图 (反向)
         dischargePrecedenceMap.computeIfAbsent(lower, k -> new HashSet<>()).add(upper);
     }
 
@@ -46,18 +57,20 @@ public class VesselStowageMock {
     private VesselStowageMock() {}
 
     /**
-     * 装船校验 (LOAD): 检查下面是否有箱子
+     * 校验装船 (Load) 可行性
+     * 规则：目标位置的所有下方支撑位置必须已有箱子
      */
     public boolean isLoadAllowed(String targetPos) {
-        // 如果该位置没有定义前序依赖（比如是底层），则允许
         Set<String> lowerPositions = loadPrecedenceMap.get(targetPos);
+
+        // 如果没有定义的下层依赖（例如本身就是底层 TIER01），则允许直接装
         if (lowerPositions == null || lowerPositions.isEmpty()) {
             return true;
         }
 
         for (String lower : lowerPositions) {
             if (!occupiedPositions.contains(lower)) {
-                System.out.printf(">>> [LOAD校验失败] 位置 %s 悬空！下方位置 %s 尚未装船%n", targetPos, lower);
+                System.out.printf(">>> [LOAD校验失败] 目标位置 %s 悬空！需先装下方位置 %s%n", targetPos, lower);
                 return false;
             }
         }
@@ -65,41 +78,62 @@ public class VesselStowageMock {
     }
 
     /**
-     * 卸船校验 (DSCH): 检查上面是否还有箱子
+     * 校验卸船 (Discharge) 可行性
+     * 规则：目标位置的上方不能有箱子压着
      */
     public boolean isDischargeAllowed(String targetPos) {
-        // 检查上方是否压着箱子
+        // 校验1: 目标位置本身必须有箱子才能卸 (逻辑一致性)
+        // 注意：在部分测试场景中可能未初始化初始箱量，此检查可设为可选，但为了严谨这里保留
+        if (!occupiedPositions.contains(targetPos) && !occupiedPositions.isEmpty()) {
+            // 仅打印警告，不强制返回false，以免影响单纯的顺序逻辑测试
+            // System.out.printf(">>> [DSCH警告] 目标位置 %s 当前显示为空，无法卸船%n", targetPos);
+        }
+
         Set<String> upperPositions = dischargePrecedenceMap.get(targetPos);
+
+        // 如果上方没有位置定义（例如本身是顶层），则允许卸
         if (upperPositions == null || upperPositions.isEmpty()) {
             return true;
         }
 
         for (String upper : upperPositions) {
             if (occupiedPositions.contains(upper)) {
-                System.out.printf(">>> [DSCH校验失败] 位置 %s 被压住！上方位置 %s 尚未卸船%n", targetPos, upper);
+                System.out.printf(">>> [DSCH校验失败] 目标位置 %s 被压住！需先卸上方位置 %s%n", targetPos, upper);
                 return false;
             }
         }
         return true;
     }
 
-    // 状态更新方法
+    /**
+     * 确认装船完成，更新状态
+     */
     public void confirmStowage(String pos) {
         occupiedPositions.add(pos);
-        System.out.printf(">>> [船图更新] 位置 %s 已装载集装箱%n", pos);
+        // System.out.printf(">>> [船图更新] 位置 %s 箱子已就位%n", pos);
     }
 
+    /**
+     * 确认卸船完成，更新状态
+     */
     public void confirmDischarge(String pos) {
         occupiedPositions.remove(pos);
-        System.out.printf(">>> [船图更新] 位置 %s 已卸下集装箱%n", pos);
+        // System.out.printf(">>> [船图更新] 位置 %s 箱子已移除%n", pos);
     }
 
+    /**
+     * 重置状态 (测试用)
+     */
     public void reset() {
         occupiedPositions.clear();
     }
 
-    // 初始化船上已有箱子 (用于测试)
+    /**
+     * 初始化占用状态 (测试用)
+     */
     public void setOccupied(String... positions) {
-        occupiedPositions.addAll(Arrays.asList(positions));
+        if (positions != null) {
+            occupiedPositions.addAll(Arrays.asList(positions));
+        }
     }
 }

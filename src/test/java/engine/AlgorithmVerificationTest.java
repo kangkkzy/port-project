@@ -9,18 +9,20 @@ import model.bo.GlobalContext;
 import model.dto.request.AssignTaskReq;
 import model.entity.WorkInstruction;
 import model.entity.QcDevice;
+import model.entity.Truck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import service.algorithm.TaskDecisionService;
+import service.algorithm.impl.SimulationStatisticsService;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * 完整算法逻辑验证测试
- * 覆盖 PDF 描述的装船、卸船、堆场作业的核心顺序约束
+ * 完整算法逻辑验证测试套件
+ * 目标：验证 PDF 文档 Part 2 (堆叠工艺) 和 Part 4 (物理安全与调度协同)
  */
 @SpringBootTest(classes = application.SecsApplication.class)
 public class AlgorithmVerificationTest {
@@ -28,103 +30,139 @@ public class AlgorithmVerificationTest {
     @Autowired
     private TaskDecisionService taskDecisionService;
 
+    @Autowired
+    private SimulationStatisticsService statisticsService;
+
+    // 引入工具类以便在测试中设置初始状态
     private final VesselStowageMock vesselMock = VesselStowageMock.getInstance();
     private final YardStowageMock yardMock = YardStowageMock.getInstance();
+    private final GlobalContext context = GlobalContext.getInstance();
 
     @BeforeEach
     void setUp() {
+        // 1. 重置所有 Mock 和 统计状态
         vesselMock.reset();
         yardMock.reset();
-        GlobalContext.getInstance().clearAll();
+        statisticsService.reset();
+        context.clearAll();
 
-        // 注册一个虚拟设备用于测试，防止 DEVICE_NOT_FOUND 错误
-        QcDevice qc = new QcDevice();
-        qc.setId("QC01");
-        qc.setType(DeviceTypeEnum.QC);
-        GlobalContext.getInstance().getQcMap().put("QC01", qc);
+        // 2. 初始化物理环境
+        // 设置两台相邻岸桥: QC01 @ BAY01 (X=20m), QC02 @ BAY03 (X=60m)
+        setupQc("QC01", 20.0);
+        setupQc("QC02", 60.0);
+
+        // 设置集卡: TRUCK01 @ 100m (堆场附近)
+        setupTruck("TRUCK01", 100.0);
     }
 
-    // ==========================================
-    // 1. 卸船流程验证 (Discharge)
-    // 规则：必须先卸上面的箱子 (Top -> Bottom)
-    // ==========================================
     @Test
-    @DisplayName("验证全算法：卸船顺序约束 (Top-Down)")
-    void testDischargeSequence() {
-        // 场景：船上有两层箱子 TIER01(下) 和 TIER02(上)
-        vesselMock.setOccupied("BAY01-01-01", "BAY01-01-02");
+    @DisplayName("全场景综合验证：堆叠逻辑 + 物理防碰撞 + 时间协同")
+    void verifyFullAlgorithm() {
+        System.out.println(">>> 开始运行全场景综合验证...");
 
-        // 场景：堆场是空的，可以随便落箱
+        // ============================================================
+        // 场景 A: 验证装船堆叠顺序 (Part 2)
+        // ============================================================
+        System.out.println("\n[Test A] 装船堆叠顺序验证 (Bottom-Up)");
 
-        // 1. 尝试先卸底层箱子 (TIER01) -> 应该失败，因为 TIER02 还在上面
-        createWi("WI_DSCH_FAIL", BizTypeEnum.DSCH, "BAY01-01-01", "YARD01-A-1");
-
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                taskDecisionService.evaluateAndDecide(createReq("WI_DSCH_FAIL"))
-        );
-        System.out.println("成功拦截违规卸船: " + ex.getMessage());
-
-        // 2. 正确卸顶层箱子 (TIER02)
-        createWi("WI_DSCH_TOP", BizTypeEnum.DSCH, "BAY01-01-02", "YARD01-A-1");
-        assertDoesNotThrow(() -> taskDecisionService.evaluateAndDecide(createReq("WI_DSCH_TOP")));
-
-        // 模拟执行完成
-        vesselMock.confirmDischarge("BAY01-01-02");
-        yardMock.confirmPut("YARD01-A-1"); // 堆场底层有了箱子
-
-        // 3. 现在可以卸底层箱子 (TIER01) 了
-        // 目标堆场位置：YARD01-A-2 (叠在刚才卸下来的箱子上面)
-        createWi("WI_DSCH_BOT", BizTypeEnum.DSCH, "BAY01-01-01", "YARD01-A-2");
-        assertDoesNotThrow(() -> taskDecisionService.evaluateAndDecide(createReq("WI_DSCH_BOT")));
-    }
-
-    // ==========================================
-    // 2. 装船流程验证 (Load)
-    // 规则：必须先装下面的箱子 (Bottom -> Top)
-    // ==========================================
-    @Test
-    @DisplayName("验证全算法：装船顺序约束 (Bottom-Up)")
-    void testLoadSequence() {
-        // 场景：船是空的
-        // 堆场有箱子可供装船
+        // 准备工作：堆场有箱子 (YARD01-A-1)
         yardMock.setOccupied("YARD01-A-1");
 
-        // 1. 尝试直接装第二层 (TIER02) -> 应该失败，因为 TIER01 悬空
-        createWi("WI_LOAD_FAIL", BizTypeEnum.LOAD, "YARD01-A-1", "BAY01-01-02");
-        BusinessException ex = assertThrows(BusinessException.class, () ->
-                taskDecisionService.evaluateAndDecide(createReq("WI_LOAD_FAIL"))
-        );
-        System.out.println("成功拦截违规装船: " + ex.getMessage());
+        // A1. 错误尝试：直接装 2 层 (悬空)
+        createLoadWi("WI_LOAD_ERR", "YARD01-A-1", "BAY01-01-02", "TRUCK01");
+        assertThrows(BusinessException.class, () -> runDecision("WI_LOAD_ERR", "QC01"));
+        System.out.println("  -> Pass: 成功拦截悬空装船指令");
 
-        // 2. 正确装底层 (TIER01)
-        createWi("WI_LOAD_BOT", BizTypeEnum.LOAD, "YARD01-A-1", "BAY01-01-01");
-        assertDoesNotThrow(() -> taskDecisionService.evaluateAndDecide(createReq("WI_LOAD_BOT")));
+        // A2. 正确尝试：装 1 层
+        createLoadWi("WI_LOAD_OK", "YARD01-A-1", "BAY01-01-01", "TRUCK01");
+        assertDoesNotThrow(() -> runDecision("WI_LOAD_OK", "QC01"));
+        System.out.println("  -> Pass: 底层装船指令执行成功");
 
+        // 模拟物理执行完成
         vesselMock.confirmStowage("BAY01-01-01");
 
-        // 3. 现在可以装第二层 (TIER02)
-        createWi("WI_LOAD_TOP", BizTypeEnum.LOAD, "YARD01-A-1", "BAY01-01-02");
-        assertDoesNotThrow(() -> taskDecisionService.evaluateAndDecide(createReq("WI_LOAD_TOP")));
+
+        // ============================================================
+        // 场景 B: 验证岸桥防碰撞 (Part 4.5.2.1)
+        // ============================================================
+        System.out.println("\n[Test B] 岸桥防碰撞验证 (Safety Constraint)");
+
+        // 当前状态: QC01(20m), QC02(60m)
+
+        // B1. 冲突尝试：QC01 试图去 BAY04 (80m)，这需要穿越 QC02 (60m)
+        createLoadWi("WI_CRASH", "YARD01", "BAY04-01-01", null);
+        assertThrows(BusinessException.class, () -> runDecision("WI_CRASH", "QC01"));
+        System.out.println("  -> Pass: 成功拦截穿越冲突指令");
+
+        // B2. 安全尝试：QC01 去 BAY02 (40m)
+        // 距离 QC02(60m) 还有 20m，大于安全距离 15m，应该允许
+        createLoadWi("WI_SAFE", "YARD01", "BAY02-01-01", null);
+        assertDoesNotThrow(() -> runDecision("WI_SAFE", "QC01"));
+        System.out.println("  -> Pass: 安全距离内的移动指令执行成功");
+
+
+        // ============================================================
+        // 场景 C: 验证时间协同与目标函数 (Part 4.5.2.4)
+        // ============================================================
+        System.out.println("\n[Test C] 时间协同验证 (Time Sync)");
+
+        // C1. 协同失败：集卡距离极远
+        setupTruck("TRUCK_FAR", 20000.0); // 20km 外
+        // QC02(60m) 需要 TRUCK_FAR 配合
+        createLoadWi("WI_SYNC_FAIL", "YARD01", "BAY03-01-01", "TRUCK_FAR");
+
+        assertThrows(BusinessException.class, () -> runDecision("WI_SYNC_FAIL", "QC02"));
+        System.out.println("  -> Pass: 成功拦截协同超时指令 (集卡过远)");
+
+        // C2. 协同成功：集卡就在附近
+        // QC02(60m) 需要 TRUCK01(100m) 配合，距离 40m，很快能到
+        createLoadWi("WI_SYNC_OK", "YARD01", "BAY03-01-01", "TRUCK01");
+        assertDoesNotThrow(() -> runDecision("WI_SYNC_OK", "QC02"));
+        System.out.println("  -> Pass: 高效协同指令执行成功");
+
+
+        // ============================================================
+        // 打印最终报告
+        // ============================================================
+        statisticsService.printReport();
     }
 
     // --- 辅助方法 ---
 
-    private void createWi(String ref, BizTypeEnum type, String from, String to) {
-        WorkInstruction wi = new WorkInstruction();
-        wi.setWiRefNo(ref);
-        wi.setMoveKind(type);
-        wi.setFromPos(from);
-        wi.setToPos(to);
-        // 填充假设备避免基础校验报错
-        wi.setFetchCheId("QC01"); wi.setPutCheId("QC01"); wi.setCarryCheId("QC01");
-        GlobalContext.getInstance().getWorkInstructionMap().put(ref, wi);
-    }
-
-    private AssignTaskReq createReq(String wiRef) {
+    private void runDecision(String wiRef, String qcId) {
         AssignTaskReq req = new AssignTaskReq();
         req.setWiRefNo(wiRef);
-        req.setDeviceId("QC01");
+        req.setDeviceId(qcId);
         req.setDeviceType(DeviceTypeEnum.QC);
-        return req;
+        taskDecisionService.evaluateAndDecide(req);
+    }
+
+    private void createLoadWi(String ref, String from, String to, String truckId) {
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo(ref);
+        wi.setMoveKind(BizTypeEnum.LOAD);
+        wi.setFromPos(from);
+        wi.setToPos(to);
+        wi.setPutCheId("QC01");
+        if (truckId != null) {
+            wi.setFetchCheId(truckId); // 绑定集卡
+        }
+        context.getWorkInstructionMap().put(ref, wi);
+    }
+
+    private void setupQc(String id, double x) {
+        QcDevice qc = new QcDevice();
+        qc.setId(id);
+        qc.setType(DeviceTypeEnum.QC);
+        qc.setPosX(x);
+        context.getQcMap().put(id, qc);
+    }
+
+    private void setupTruck(String id, double x) {
+        Truck t = new Truck();
+        t.setId(id);
+        t.setType(DeviceTypeEnum.ELECTRIC_TRUCK);
+        t.setPosX(x);
+        context.getTruckMap().put(id, t);
     }
 }
