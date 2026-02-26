@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import service.algorithm.MapDataService;
 import service.algorithm.TaskDecisionService;
 
 import java.util.HashMap;
@@ -37,6 +38,9 @@ public class LoadingSequenceTest {
     @Autowired
     private TaskDecisionService taskDecisionService; // 注入决策服务
 
+    @Autowired
+    private MapDataService mapDataService; // [修复1] 注入地图数据服务，防止防碰撞和协同校验失败
+
     private final VesselStowageMock vesselMock = VesselStowageMock.getInstance();
     private final GlobalContext context = GlobalContext.getInstance();
 
@@ -45,6 +49,21 @@ public class LoadingSequenceTest {
         engine.reset();
         vesselMock.reset();
         context.clearAll();
+
+        // [修复1] 加载地图配置，防止 SafetyAndSyncValidator 由于缺乏坐标参数而抛出“致命错误”
+        String jsonConfig = "{"
+                + "\"coordinates\": {"
+                + "  \"BAY01\": 20.0"
+                + "},"
+                + "\"parameters\": {"
+                + "  \"minQcDistance\": 15.0,"
+                + "  \"truckSpeed\": 5.0,"
+                + "  \"qcSpeed\": 0.8,"
+                + "  \"maxSyncWaitMs\": 900000.0"
+                + "}"
+                + "}";
+        mapDataService.loadMapConfiguration(jsonConfig);
+
         setupBasicDevices();
     }
 
@@ -73,7 +92,8 @@ public class LoadingSequenceTest {
         });
 
         System.out.println("成功捕获预期异常: " + exception.getMessage());
-        assertTrue(exception.getMessage().contains("违反装船顺序约束"));
+        // [修复2] 匹配 StowageValidator 中实际抛出的异常信息 "装船顺序错误"
+        assertTrue(exception.getMessage().contains("装船顺序错误"));
     }
 
     /**
