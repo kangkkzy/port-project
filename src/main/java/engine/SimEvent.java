@@ -38,6 +38,25 @@ public class SimEvent implements Comparable<SimEvent> {
     }
 
     /**
+     * 获取事件关联的“主设备ID”
+     * 尝试按 DEVICE -> TRUCK -> CRANE 的顺序回退
+     */
+    public String getPrimaryDeviceId() {
+        if (subjects == null || subjects.isEmpty()) {
+            return null;
+        }
+        String id = subjects.get("DEVICE");
+        if (id != null) {
+            return id;
+        }
+        id = subjects.get("TRUCK");
+        if (id != null) {
+            return id;
+        }
+        return subjects.get("CRANE");
+    }
+
+    /**
      * 添加参与该事件的主体
      */
     public void addSubject(String role, String targetId) {

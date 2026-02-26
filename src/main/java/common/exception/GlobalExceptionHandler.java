@@ -26,10 +26,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public Result handleBusinessException(BusinessException e) {
         log.warn("业务异常: {}", e.getMessage());
-        // 记录到错误日志
-        errorLog.recordEventProcessingError(null, null,
-                model.bo.GlobalContext.getInstance().getSimTime(),
-                "业务异常: " + e.getMessage(), e);
         return Result.error(e.getMessage());
     }
 
@@ -49,10 +45,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public Result handleException(Exception e) {
         log.error("系统异常", e);
-        // 记录到错误日志
-        errorLog.recordEventProcessingError(null, null,
-                model.bo.GlobalContext.getInstance().getSimTime(),
-                "系统异常: " + e.getClass().getSimpleName(), e);
         return Result.error("系统内部错误: " + e.getMessage());
     }
 }
