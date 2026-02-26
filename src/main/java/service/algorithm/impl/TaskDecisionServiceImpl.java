@@ -2,7 +2,8 @@ package service.algorithm.impl;
 
 import common.consts.ErrorCodes;
 import common.exception.BusinessException;
-import model.bo.GlobalContext;
+import engine.log.SimulationStatisticsService;
+import engine.context.GlobalContext;
 import model.dto.request.AssignTaskReq;
 import model.dto.response.AssignTaskResp;
 import model.entity.BaseDevice;

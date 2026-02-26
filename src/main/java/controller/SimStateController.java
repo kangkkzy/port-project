@@ -1,7 +1,7 @@
 package controller;
 
 import common.Result;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.dto.snapshot.*;
 import model.entity.*;
 import org.springframework.web.bind.annotation.GetMapping;

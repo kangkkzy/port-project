@@ -1,7 +1,7 @@
 package engine;
 
 import common.consts.EventTypeEnum;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 
 /**
  * 事件处理器扩展点

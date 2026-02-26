@@ -1,4 +1,4 @@
-package service.algorithm.impl;
+package engine.log;
 
 import model.dto.snapshot.EventLogEntryDto;
 import org.springframework.stereotype.Component;

@@ -8,7 +8,7 @@ import common.consts.FenceStateEnum;
 import common.exception.BusinessException;
 import engine.SimEvent;
 import engine.SimulationEngine;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.dto.request.*;
 import model.dto.response.AssignTaskResp;
 import model.entity.BaseDevice;

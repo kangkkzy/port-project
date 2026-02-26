@@ -11,7 +11,7 @@ import engine.SimulationEngine;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 
 import java.util.ArrayList;
 import java.util.List;

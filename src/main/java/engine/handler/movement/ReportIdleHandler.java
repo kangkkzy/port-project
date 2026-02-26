@@ -5,7 +5,7 @@ import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
 import lombok.extern.slf4j.Slf4j;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import org.springframework.stereotype.Component;
 
 /**

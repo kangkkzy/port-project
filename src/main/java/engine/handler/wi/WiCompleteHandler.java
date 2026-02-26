@@ -5,7 +5,7 @@ import common.consts.WiStatusEnum;
 import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.WorkInstruction;
 import org.springframework.stereotype.Component;
 

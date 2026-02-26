@@ -1,7 +1,6 @@
 package common.util;
 
-import common.consts.DeviceTypeEnum;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.BaseDevice;
 import model.entity.QcDevice;
 import model.entity.Truck;

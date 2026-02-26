@@ -1,12 +1,11 @@
 package engine;
 
 import common.config.PhysicsConfig;
-import common.consts.BizTypeEnum;
 import common.consts.EventTypeEnum;
 import common.exception.SimulationDeadLoopException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.dto.snapshot.EventLogEntryDto;
 import model.entity.BaseDevice;
 import model.entity.WorkInstruction;
@@ -19,8 +18,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
 
-import service.algorithm.impl.SimulationEventLog;
-import service.algorithm.impl.SimulationErrorLog;
+import engine.log.SimulationEventLog;
+import engine.log.SimulationErrorLog;
 
 /**
  * 仿真引擎核心

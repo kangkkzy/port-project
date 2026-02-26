@@ -5,7 +5,7 @@ import common.consts.DeviceTypeEnum;
 import common.exception.BusinessException;
 import common.util.VesselStowageMock;
 import common.util.YardStowageMock;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.dto.request.AssignTaskReq;
 import model.entity.AscDevice;
 import model.entity.WorkInstruction;
@@ -18,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import service.algorithm.MapDataService;
 import service.algorithm.TaskDecisionService;
-import service.algorithm.impl.SimulationStatisticsService;
+import engine.log.SimulationStatisticsService;
 
 import static org.junit.jupiter.api.Assertions.*;
 

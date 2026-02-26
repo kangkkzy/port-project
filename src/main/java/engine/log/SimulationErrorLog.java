@@ -1,4 +1,4 @@
-package service.algorithm.impl;
+package engine.log;
 
 import common.consts.EventTypeEnum;
 import lombok.Data;

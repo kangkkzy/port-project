@@ -3,7 +3,7 @@ package controller;
 import common.Result;
 import engine.SimulationEngine;
 import lombok.Data;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.*;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;

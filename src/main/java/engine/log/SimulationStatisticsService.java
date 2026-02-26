@@ -1,4 +1,4 @@
-package service.algorithm.impl;
+package engine.log;
 
 import org.springframework.stereotype.Service;
 import java.util.concurrent.atomic.AtomicLong;

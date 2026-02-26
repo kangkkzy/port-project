@@ -1,6 +1,6 @@
 package common.config;
 
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Configuration;
 

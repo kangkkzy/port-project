@@ -6,7 +6,7 @@ import common.exception.BusinessException;
 import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.BaseDevice;
 import model.entity.Point;
 import org.springframework.stereotype.Component;

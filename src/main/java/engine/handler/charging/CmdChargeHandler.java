@@ -7,7 +7,7 @@ import common.util.GisUtil;
 import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.ChargingStation;
 import model.entity.Point;
 import model.entity.Truck;

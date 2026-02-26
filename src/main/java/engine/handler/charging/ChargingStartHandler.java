@@ -5,7 +5,7 @@ import common.consts.EventTypeEnum;
 import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.entity.ChargingStation;
 import model.entity.Truck;
 import org.springframework.stereotype.Component;

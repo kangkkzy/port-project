@@ -5,7 +5,7 @@ import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
 import common.exception.BusinessException;
 import common.util.VesselStowageMock;
-import model.bo.GlobalContext;
+import engine.context.GlobalContext;
 import model.dto.request.AssignTaskReq;
 import model.entity.Container;
 import model.entity.QcDevice;
