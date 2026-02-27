@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard">
     <div class="toolbar">
-      <h2>港口离散仿真系统 (动态企业版)</h2>
+      <h2>港口离散仿真系统 </h2>
       <div class="buttons">
         <el-button type="warning" @click="handleLoadMockData">一键加载测试场景</el-button>
         <el-button type="primary" @click="handleStep">单步执行 (Next)</el-button>
@@ -96,7 +96,7 @@ const selectedDeviceId = ref('')
 const selectedDeviceType = ref('')
 const logContainer = ref<HTMLElement | null>(null)
 
-// 【新增】专门用于动画渲染的设备数组
+// 专门用于动画渲染的设备数组
 const displayDevices = ref<Record<string, any>>({})
 
 // 日志自动滚动到底部
@@ -107,7 +107,7 @@ watch(() => simStore.events.length, async () => {
   }
 })
 
-// 【新增】核心渲染循环 (60FPS 平滑补间算法)
+// 核心渲染循环 (60FPS 平滑补间算法)
 const animateLoop = () => {
   simStore.devices.forEach(target => {
     if (!displayDevices.value[target.id]) {
@@ -165,7 +165,7 @@ const selectDevice = (id: string, type: string) => {
   selectedDeviceType.value = type
 }
 
-// 约束寻路算法 (和之前一样)
+// 约束寻路算法
 const handleStageClick = async (e: any) => {
   if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
   const pos = e.target.getStage().getPointerPosition();
