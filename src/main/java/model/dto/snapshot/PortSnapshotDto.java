@@ -18,6 +18,11 @@ public class PortSnapshotDto {
     private List<DeviceSnapshotDto> devices;
     private List<FenceSnapshotDto> fences;
     private List<ChargingStationSnapshotDto> chargingStations;
+    /**
+     * 靠泊船舶快照（用于前端地图展示）
+     */
+    private List<VesselSnapshotDto> vessels;
     private List<WorkInstructionSnapshotDto> workInstructions;
 }
+
 

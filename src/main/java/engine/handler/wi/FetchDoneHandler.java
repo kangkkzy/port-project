@@ -1,5 +1,6 @@
 package engine.handler.wi;
 
+import common.exception.BusinessException;
 import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
 import common.consts.EventTypeEnum;
@@ -39,8 +40,8 @@ public class FetchDoneHandler implements SimEventHandler {
 
             String wiRefNo = device.getCurrWiRefNo();
             if (wiRefNo == null) {
-                log.warn("事件[FETCH_DONE]: 设备 [{}] 未绑定作业指令，跳过。", deviceId);
-                return;
+                log.error("严重错误: 事件[FETCH_DONE]: 设备 [{}] 无作业指令，触发熔断暂停", deviceId);
+                throw new BusinessException("设备 [" + deviceId + "] 无作业指令，FETCH_DONE事件无法处理");
             }
             WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
             if (wi != null) {
@@ -60,7 +61,8 @@ public class FetchDoneHandler implements SimEventHandler {
                 if (!allowedFetch) {
                     if (BizTypeUtil.requiresFetchDevice(bizType)) {
                         if (!isPutDevice || wi.getCarryCheId() == null) {
-                            log.warn("事件[FETCH_DONE]: 设备 [{}] 与指令 [{}] 抓箱设备不匹配", deviceId, wiRefNo);
+                            log.error("严重错误: 事件[FETCH_DONE]: 设备 [{}] 与指令 [{}] 抓箱设备不匹配，触发熔断暂停", deviceId, wiRefNo);
+                            throw new BusinessException(String.format("设备 [%s] 与指令 [%s] 抓箱设备不匹配", deviceId, wiRefNo));
                         }
                     }
                     return;
@@ -77,9 +79,10 @@ public class FetchDoneHandler implements SimEventHandler {
                                     new Point(truck.getPosX(), truck.getPosY())
                             );
                             if (dist > 5.0) {
-                                log.error("严重错误: 设备 [{}] 距集卡 [{}] 过远 ({:.2f}m)，无法抓箱。指令: {}",
+                                log.error("严重错误: 设备 [{}] 距集卡 [{}] 过远 ({:.2f}m)，无法抓箱，触发熔断暂停。指令: {}",
                                         deviceId, truck.getId(), dist, wiRefNo);
-                                return;
+                                throw new BusinessException(String.format("设备 [%s] 距集卡 [%s] 过远 (%.2fm)，无法抓箱",
+                                        deviceId, truck.getId(), dist));
                             }
                         }
                     }

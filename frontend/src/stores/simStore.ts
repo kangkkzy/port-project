@@ -17,6 +17,7 @@ export const useSimStore = defineStore('simulation', {
         devices: [] as any[],
         fences: [] as any[],
         chargingStations: [] as any[],
+        vessels: [] as any[],
         workInstructions: [] as any[],
         events: [] as any[],
         errors: [] as any[],
@@ -38,6 +39,7 @@ export const useSimStore = defineStore('simulation', {
                     this.devices = data.devices || [];
                     this.fences = data.fences || [];
                     this.chargingStations = data.chargingStations || [];
+                    this.vessels = data.vessels || [];
                     this.workInstructions = data.workInstructions || [];
                 }
                 // 每次拿完快照，顺便去拿一下最新的日志

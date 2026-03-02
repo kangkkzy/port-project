@@ -41,6 +41,7 @@ public class SimStateController {
         snapshot.setDevices(buildDeviceSnapshots(ctx));
         snapshot.setFences(buildFenceSnapshots(ctx));
         snapshot.setChargingStations(buildChargingStationSnapshots(ctx));
+        snapshot.setVessels(buildVesselSnapshots(ctx));
         snapshot.setWorkInstructions(buildWiSnapshots(ctx));
 
         return Result.success("查询成功", snapshot);
@@ -117,6 +118,21 @@ public class SimStateController {
             // 占用情况
             dto.setTruckId(s.getTruckId());
             dto.setChargeRate(s.getChargeRate());
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 构建靠泊船舶快照
+     */
+    private List<VesselSnapshotDto> buildVesselSnapshots(GlobalContext ctx) {
+        return ctx.getVesselMap().values().stream().map(v -> {
+            VesselSnapshotDto dto = new VesselSnapshotDto();
+            dto.setVesselId(v.getVesselId());
+            dto.setVesselBerth(v.getVesselBerth());
+            dto.setBerthLocation(v.getBerthLocation());
+            dto.setSideTo(v.getSideTo());
+            dto.setLength(v.getLength());
             return dto;
         }).collect(Collectors.toList());
     }

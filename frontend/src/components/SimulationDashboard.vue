@@ -41,8 +41,64 @@
               <v-line :config="{ points: [550, 200, 550, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [750, 200, 750, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
 
-              <v-circle v-for="fence in simStore.fences" :key="fence.nodeId"
-                        :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
+              <!-- 围栏 -->
+              <v-circle
+                  v-for="fence in simStore.fences"
+                  :key="fence.nodeId"
+                  :config="{
+                  x: fence.posX,
+                  y: fence.posY,
+                  radius: fence.radius || 20,
+                  fill: fence.status === '02' ? '#4caf50' : '#f44336',
+                  opacity: 0.5,
+                  stroke: '#333',
+                  strokeWidth: 2
+                }"
+              />
+
+              <!-- 充电桩 -->
+              <v-rect
+                  v-for="station in simStore.chargingStations"
+                  :key="station.stationCode"
+                  :config="{
+                  x: station.posX - 8,
+                  y: station.posY - 8,
+                  width: 16,
+                  height: 16,
+                  fill: '#ffeb3b',
+                  stroke: '#f57f17',
+                  strokeWidth: 2,
+                  cornerRadius: 3
+                }"
+              />
+
+              <!-- 船舶：按泊位坐标绘制在海域 -->
+              <v-rect
+                  v-for="v in simStore.vessels"
+                  :key="v.vesselId"
+                  :config="{
+                  x: (v.berthLocation || 0) - (v.length || 50) / 2,
+                  y: 20,
+                  width: v.length || 50,
+                  height: 40,
+                  fill: '#90caf9',
+                  stroke: '#0d47a1',
+                  strokeWidth: 2,
+                  cornerRadius: 5
+                }"
+              />
+              <v-text
+                  v-for="v in simStore.vessels"
+                  :key="v.vesselId + '-label'"
+                  :config="{
+                  x: (v.berthLocation || 0) - 30,
+                  y: 65,
+                  text: v.vesselId,
+                  fontSize: 12,
+                  fill: '#0d47a1',
+                  fontStyle: 'bold'
+                }"
+              />
             </v-layer>
 
             <v-layer>

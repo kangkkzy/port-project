@@ -1,5 +1,6 @@
 package engine.handler.wi;
 
+import common.exception.BusinessException;
 import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
 import common.consts.EventTypeEnum;
@@ -38,8 +39,8 @@ public class PutDoneHandler implements SimEventHandler {
 
             String wiRefNo = device.getCurrWiRefNo();
             if (wiRefNo == null) {
-                log.warn("事件[PUT_DONE]: 设备 [{}] 无指令", deviceId);
-                return;
+                log.error("严重错误: 事件[PUT_DONE]: 设备 [{}] 无作业指令，触发熔断暂停", deviceId);
+                throw new BusinessException("设备 [" + deviceId + "] 无作业指令，PUT_DONE事件无法处理");
             }
             WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNo);
             if (wi != null) {
@@ -71,9 +72,10 @@ public class PutDoneHandler implements SimEventHandler {
                                 new Point(truck.getPosX(), truck.getPosY())
                         );
                         if (dist > 5.0) {
-                            log.error("严重错误: 设备 [{}] 距集卡 [{}] 过远 ({:.2f}m)，无法放箱。指令: {}",
+                            log.error("严重错误: 设备 [{}] 距集卡 [{}] 过远 ({:.2f}m)，无法放箱，触发熔断暂停。指令: {}",
                                     deviceId, truck.getId(), dist, wiRefNo);
-                            return;
+                            throw new BusinessException(String.format("设备 [%s] 距集卡 [%s] 过远 (%.2fm)，无法放箱",
+                                    deviceId, truck.getId(), dist));
                         }
                     }
 
