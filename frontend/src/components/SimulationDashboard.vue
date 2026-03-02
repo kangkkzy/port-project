@@ -1,18 +1,34 @@
 <template>
   <div class="dashboard">
     <div class="toolbar">
-      <h2>港口离散仿真系统 </h2>
+      <h2>港口离散仿真系统</h2>
       <div class="buttons">
-        <el-button type="warning" @click="handleLoadMockData">一键加载测试场景</el-button>
         <el-button type="primary" @click="handleStep">单步执行 (Next)</el-button>
         <el-button type="success" @click="handleTogglePlay">
           {{ simStore.isPlaying ? '暂停播放' : '自动播放' }}
         </el-button>
         <el-button type="danger" @click="handleReset">重置系统</el-button>
         <el-divider direction="vertical" />
-        <el-button type="info" @click="handleTestTruckDelivery">测试: 集卡配送流程</el-button>
-        <el-button type="info" @click="handleTestQcOperation">测试: 桥吊作业流程</el-button>
-        <el-button type="info" @click="handleTestAscOperation">测试: 龙门吊作业流程</el-button>
+
+        <el-dropdown @command="handleTestScenario">
+          <el-button type="warning">
+            仿真业务自动演示 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="task-chain" style="font-weight:bold; color:#E6A23C;">
+                🌟 进出口核心任务链 (卸船->移箱->提货)
+              </el-dropdown-item>
+              <el-dropdown-item divided command="dsch">单环节：DSCH (卸船)</el-dropdown-item>
+              <el-dropdown-item command="load">单环节：LOAD (装船)</el-dropdown-item>
+              <el-dropdown-item command="yard-shift">单环节：YARD_SHIFT (场内移箱)</el-dropdown-item>
+              <el-dropdown-item command="dlvr">单环节：DLVR (外场提箱)</el-dropdown-item>
+              <el-dropdown-item command="recv">单环节：RECV (外场收箱)</el-dropdown-item>
+              <el-dropdown-item command="direct-in">单环节：DIRECT_IN (直进船)</el-dropdown-item>
+              <el-dropdown-item command="direct-out">单环节：DIRECT_OUT (直提)</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
       <div class="time-display">
         当前仿真时钟: <strong>{{ simStore.simTime }}</strong> ms
@@ -41,7 +57,6 @@
               <v-line :config="{ points: [550, 200, 550, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [750, 200, 750, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
 
-              <!-- 围栏 -->
               <v-circle
                   v-for="fence in simStore.fences"
                   :key="fence.nodeId"
@@ -56,7 +71,6 @@
                 }"
               />
 
-              <!-- 充电桩 -->
               <v-rect
                   v-for="station in simStore.chargingStations"
                   :key="station.stationCode"
@@ -72,7 +86,6 @@
                 }"
               />
 
-              <!-- 船舶：按泊位坐标绘制在海域 -->
               <v-rect
                   v-for="v in simStore.vessels"
                   :key="v.vesselId"
@@ -274,8 +287,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
-import { loadScenario, moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcOperation, testAscOperation } from '../api/simulation'
+import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testDsch, testLoad, testYardShift, testDlvr, testRecv, testDirectIn, testDirectOut, testTaskChain } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
@@ -325,7 +339,6 @@ watch(() => simStore.events.length, async () => {
 const animateLoop = () => {
   simStore.devices.forEach(target => {
     if (!displayDevices.value[target.id]) {
-      // 第一次出现，直接放到位置上
       displayDevices.value[target.id] = { ...target };
     } else {
       const curr = displayDevices.value[target.id];
@@ -345,16 +358,13 @@ const animateLoop = () => {
       curr.type = target.type;
     }
   });
-  // 保持循环调用
   animFrameId = requestAnimationFrame(animateLoop);
 };
 
 onMounted(() => {
   simStore.updateSnapshot()
-  simStore.loadMapPaths() // 加载地图路径配置
-  // 启动轮询
+  simStore.loadMapPaths()
   timer = setInterval(() => { if (!simStore.isPlaying) simStore.updateSnapshot() }, 1000)
-  // 启动动画引擎
   animateLoop()
 })
 
@@ -382,17 +392,14 @@ const selectDevice = (id: string, type: string) => {
   if (device) {
     selectedDeviceState.value = device.state
     selectedDevicePower.value = device.powerLevel || null
-    // 设置集卡默认目标为当前位置
     if (type === 'ELECTRIC_TRUCK' || type === 'INTERNAL_TRUCK') {
       truckMoveTarget.value = { x: Math.round(device.posX), y: Math.round(device.posY), speed: 10 }
     }
-    // 设置起重机默认距离为0
     if (type === 'QC' || type === 'ASC') {
       craneMoveDistance.value = 0
       craneMoveSpeed.value = 10
     }
   }
-  // 清空充电站选择
   chargeStationId.value = ''
   simStore.setSelectedDevice(device)
 }
@@ -478,11 +485,9 @@ const handleCharge = async () => {
 // 围栏控制
 const toggleFence = async (fence: any) => {
   try {
-    // 后端状态: "01"=禁止通行(BLOCKED), "02"=通行(PASSABLE)
-    // 当前是 "01" 就改成 "02"，反之亦然
     const newStatus = fence.status === '01' ? '02' : '01'
     await controlFence({
-      fenceId: fence.nodeId,  // 使用 nodeId 作为 fenceId
+      fenceId: fence.nodeId,
       status: newStatus
     })
     ElMessage.success(`围栏已${newStatus === '02' ? '开启' : '关闭'}`)
@@ -493,18 +498,14 @@ const toggleFence = async (fence: any) => {
 }
 
 // ==================== 路径验证函数 ====================
-
-// 从地图配置中获取指定类型的路径
 const getPathsByType = (pathType: string) => {
   return simStore.mapPaths.filter(p => p.pathType === pathType);
 };
 
-// QC(桥吊) 只能在水平轨道上移动
 const isValidQCPosition = (x: number, y: number): boolean => {
   const qcPaths = getPathsByType('QC_RAIL');
   if (qcPaths.length === 0) {
-    console.warn('未配置QC_RAIL路径，使用默认验证');
-    return Math.abs(y - 140) < 5; // 默认值
+    return Math.abs(y - 140) < 5;
   }
   return qcPaths.some(path => {
     if (path.direction !== 'HORIZONTAL') return false;
@@ -512,12 +513,10 @@ const isValidQCPosition = (x: number, y: number): boolean => {
   });
 };
 
-// ASC(龙门吊) 只能在垂直轨道上移动
 const isValidASCPosition = (x: number, y: number): boolean => {
   const ascPaths = getPathsByType('ASC_RAIL');
   if (ascPaths.length === 0) {
-    console.warn('未配置ASC_RAIL路径，使用默认验证');
-    return [175, 425, 675].some(rail => Math.abs(x - rail) < 5); // 默认值
+    return [175, 425, 675].some(rail => Math.abs(x - rail) < 5);
   }
   return ascPaths.some(path => {
     if (path.direction !== 'VERTICAL') return false;
@@ -525,11 +524,9 @@ const isValidASCPosition = (x: number, y: number): boolean => {
   });
 };
 
-// 集卡只能在道路网格上移动
 const isValidTruckPosition = (x: number, y: number): boolean => {
   const truckPaths = getPathsByType('TRUCK_ROAD');
   if (truckPaths.length === 0) {
-    console.warn('未配置TRUCK_ROAD路径，使用默认验证');
     const hRoads = [200, 550];
     const vRoads = [50, 300, 550, 750];
     return hRoads.some(road => Math.abs(y - road) < 5) || vRoads.some(road => Math.abs(x - road) < 5);
@@ -544,10 +541,8 @@ const isValidTruckPosition = (x: number, y: number): boolean => {
   });
 };
 
-// 计算集卡道路网的边界，用于将点击点限制在道路范围内
 const getTruckRoadBounds = () => {
   const truckPaths = getPathsByType('TRUCK_ROAD');
-  // 默认边界，与示意图一致
   let minX = 50, maxX = 750, minY = 200, maxY = 550;
 
   if (truckPaths.length === 0) {
@@ -571,7 +566,6 @@ const getTruckRoadBounds = () => {
   return { minX, maxX, minY, maxY };
 };
 
-// 验证设备移动目标是否在有效路径上
 const validateMoveTarget = (deviceType: string, x: number, y: number): string | null => {
   if (deviceType === 'QC' || deviceType === 'CRANE_QC') {
     if (!isValidQCPosition(x, y)) {
@@ -607,8 +601,6 @@ const validateMoveTarget = (deviceType: string, x: number, y: number): string | 
 };
 
 // ==================== 设备移动处理 ====================
-
-// 约束寻路算法 - 设备移动
 const handleStageClick = async (e: any) => {
   if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
   const pos = e.target.getStage().getPointerPosition();
@@ -617,53 +609,30 @@ const handleStageClick = async (e: any) => {
 
   try {
     if (selectedDeviceType.value === 'QC') {
-      // QC(桥吊): 只能在水平轨道上移动(y=140)
       const targetX = Math.max(0, Math.min(800, pos.x));
-      const targetY = 140; // 固定在轨道上
+      const targetY = 140;
 
-      // 验证目标位置
       const error = validateMoveTarget('QC', targetX, targetY);
-      if (error) {
-        ElMessage.warning(error);
-        return;
-      }
+      if (error) { ElMessage.warning(error); return; }
 
       const distance = targetX - device.posX;
       if (Math.abs(distance) > 1) {
-        await moveCrane({
-          craneId: device.id,
-          moveType: "MOVE_HORIZONTAL",
-          distance: distance,
-          speed: 10.0
-        });
+        await moveCrane({ craneId: device.id, moveType: "MOVE_HORIZONTAL", distance: distance, speed: 10.0 });
       }
     } else if (selectedDeviceType.value === 'ASC') {
-      // ASC(龙门吊): 只能在垂直轨道上移动(x=175,425,675)
       const ascRails = [175, 425, 675];
-      const nearestRail = ascRails.reduce((prev, curr) =>
-          Math.abs(curr - device.posX) < Math.abs(prev - device.posX) ? curr : prev
-      );
+      const nearestRail = ascRails.reduce((prev, curr) => Math.abs(curr - device.posX) < Math.abs(prev - device.posX) ? curr : prev);
       const targetX = nearestRail;
       const targetY = Math.max(200, Math.min(550, pos.y));
 
-      // 验证目标位置
       const error = validateMoveTarget('ASC', targetX, targetY);
-      if (error) {
-        ElMessage.warning(error);
-        return;
-      }
+      if (error) { ElMessage.warning(error); return; }
 
       const distance = targetY - device.posY;
       if (Math.abs(distance) > 1) {
-        await moveCrane({
-          craneId: device.id,
-          moveType: "MOVE_VERTICAL",
-          distance: distance,
-          speed: 10.0
-        });
+        await moveCrane({ craneId: device.id, moveType: "MOVE_VERTICAL", distance: distance, speed: 10.0 });
       }
     } else {
-      // 集卡: 只能在道路网格上移动
       const hRoads = [200, 550];
       const vRoads = [50, 300, 550, 750];
       const nearestH = hRoads.reduce((prev, curr) => Math.abs(curr - pos.y) < Math.abs(prev - pos.y) ? curr : prev);
@@ -674,21 +643,15 @@ const handleStageClick = async (e: any) => {
       let targetX = pos.x;
       let targetY = pos.y;
       if (Math.abs(nearestH - pos.y) < Math.abs(nearestV - pos.x)) {
-        // 更接近水平车道：Y 吸附到最近的水平道路，X 保持用户点击位置（并限制在道路范围内）
         targetY = nearestH;
         targetX = Math.max(minX, Math.min(maxX, pos.x));
       } else {
-        // 更接近垂直车道：X 吸附到最近的垂直道路，Y 保持用户点击位置（并限制在道路范围内）
         targetX = nearestV;
         targetY = Math.max(minY, Math.min(maxY, pos.y));
       }
 
-      // 验证目标位置
       const error = validateMoveTarget(selectedDeviceType.value, targetX, targetY);
-      if (error) {
-        ElMessage.warning(error);
-        return;
-      }
+      if (error) { ElMessage.warning(error); return; }
 
       await moveTruck({ truckId: device.id, targetPoint: { x: targetX, y: targetY }, speed: 10.0 });
     }
@@ -702,58 +665,36 @@ const handleStep = () => { simStore.doStepNext() }
 const handleTogglePlay = () => { simStore.togglePlay() }
 const handleReset = () => { simStore.doReset() }
 
-// 测试场景：集卡完整配送流程
-const handleTestTruckDelivery = async () => {
+// ===================== 核心测试分发方法 =====================
+const handleTestScenario = async (command: string) => {
   try {
-    // 先确保场景已加载
-    await handleLoadMockData()
-    // 触发后端集卡配送流程测试
-    const res = await testTruckDelivery()
-    // 因为 request.ts 拦截器成功时直接返回 res.data，如果代码走到这里，说明后端一定返回了 code: 200
-    ElMessage.success(typeof res === 'string' ? res : '集卡配送流程已启动')
-  } catch (err: any) {
-    ElMessage.error(err.message || '测试启动失败')
-  }
-}
+    await simStore.doReset();
+    simStore.stopAutoPlay();
 
-// 测试场景：桥吊作业流程
-const handleTestQcOperation = async () => {
-  try {
-    await handleLoadMockData()
-    const res = await testQcOperation()
-    ElMessage.success(typeof res === 'string' ? res : '桥吊作业流程已启动')
-  } catch (err: any) {
-    ElMessage.error(err.message || '测试启动失败')
-  }
-}
+    let res;
+    switch (command) {
+      case 'task-chain': res = await testTaskChain(); break;
+      case 'dsch': res = await testDsch(); break;
+      case 'load': res = await testLoad(); break;
+      case 'yard-shift': res = await testYardShift(); break;
+      case 'dlvr': res = await testDlvr(); break;
+      case 'recv': res = await testRecv(); break;
+      case 'direct-in': res = await testDirectIn(); break;
+      case 'direct-out': res = await testDirectOut(); break;
+    }
 
-// 测试场景：龙门吊作业流程
-const handleTestAscOperation = async () => {
-  try {
-    await handleLoadMockData()
-    const res = await testAscOperation()
-    ElMessage.success(typeof res === 'string' ? res : '龙门吊作业流程已启动')
-  } catch (err: any) {
-    ElMessage.error(err.message || '测试启动失败')
-  }
-}
+    ElMessage.success({
+      message: typeof res === 'string' ? res : `[${command}] 测试指令注入成功`,
+      duration: 4000
+    });
 
-const handleLoadMockData = async () => {
-  const mockData = {
-    trucks: [
-      { id: "TRUCK_01", type: "ELECTRIC_TRUCK", state: "IDLE", posX: 50, posY: 200, powerLevel: 100 },
-      { id: "TRUCK_02", type: "ELECTRIC_TRUCK", state: "IDLE", posX: 550, posY: 550, powerLevel: 80 }
-    ],
-    qcDevices: [
-      { id: "QC_01", type: "QC", state: "IDLE", posX: 400, posY: 140 }
-    ],
-    ascDevices: [
-      { id: "ASC_01", type: "ASC", state: "IDLE", posX: 175, posY: 300 },
-      { id: "ASC_02", type: "ASC", state: "IDLE", posX: 675, posY: 450 }
-    ]
+    await simStore.updateSnapshot();
+    if(!simStore.isPlaying) {
+      simStore.togglePlay();
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '测试调度失败，请检查控制台或引擎异常');
   }
-  await loadScenario(mockData)
-  await simStore.updateSnapshot()
 }
 </script>
 
