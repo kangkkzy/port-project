@@ -37,9 +37,9 @@
               <v-line :config="{ points: [550, 200, 550, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [750, 200, 750, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
 
-              <!-- 围栏显示 -->
+              <!-- 围栏显示: "02"=通行(绿色), "01"=禁止通行(红色) -->
               <v-circle v-for="fence in simStore.fences" :key="fence.nodeId"
-                        :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === 'OPEN' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
+                        :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
             </v-layer>
 
             <v-layer>
@@ -97,7 +97,7 @@
             <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK' || selectedDeviceType === 'INTERNAL_TRUCK'" type="primary" size="small" @click="showTruckMoveDialog = true">移动</el-button>
             <el-button v-if="selectedDeviceType === 'QC'" type="primary" size="small" @click="showCraneMoveDialog = true">移动</el-button>
             <el-button v-if="selectedDeviceType === 'ASC'" type="primary" size="small" @click="showCraneMoveDialog = true">移动</el-button>
-            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK'" type="warning" size="small" @click="handleCharge">充电</el-button>
+            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK'" type="warning" size="small" @click="showChargeDialog = true">充电</el-button>
             <el-button v-if="selectedDeviceType === 'QC' || selectedDeviceType === 'ASC'" type="success" size="small" @click="showCraneOpDialog = true">操作</el-button>
           </div>
         </div>
@@ -108,8 +108,8 @@
           <ul class="fence-list">
             <li v-for="fence in simStore.fences" :key="fence.nodeId">
               <span class="fence-id">{{ fence.nodeId }}</span>
-              <span :class="['fence-status', fence.status === 'OPEN' ? 'open' : 'closed']">{{ fence.status }}</span>
-              <el-button size="small" @click="toggleFence(fence)">{{ fence.status === 'OPEN' ? '关闭' : '开启' }}</el-button>
+              <span :class="['fence-status', fence.status === '02' ? 'open' : 'closed']">{{ fence.status === '02' ? '通行' : '禁止通行' }}</span>
+              <el-button size="small" @click="toggleFence(fence)">{{ fence.status === '02' ? '关闭' : '开启' }}</el-button>
             </li>
           </ul>
         </div>
@@ -163,15 +163,15 @@
       <el-form label-width="80px">
         <el-form-item label="移动类型">
           <el-select v-model="craneMoveType">
-            <el-option label="水平移动" value="MOVE_HORIZONTAL" />
-            <el-option label="垂直移动" value="MOVE_VERTICAL" />
+            <el-option label="水平移动(MOVE_HORIZONTAL)" value="MOVE_HORIZONTAL" />
+            <el-option label="垂直移动(MOVE_VERTICAL)" value="MOVE_VERTICAL" />
           </el-select>
         </el-form-item>
-        <el-form-item label="距离">
+        <el-form-item label="距离(米)">
           <el-input-number v-model="craneMoveDistance" :min="-500" :max="500" />
         </el-form-item>
-        <el-form-item label="速度">
-          <el-input-number v-model="craneMoveSpeed" :min="1" :max="50" />
+        <el-form-item label="速度(米/秒)">
+          <el-input-number v-model="craneMoveSpeed" :min="1" :max="50" :step="0.5" :precision="1" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -185,14 +185,38 @@
       <el-form label-width="80px">
         <el-form-item label="操作类型">
           <el-select v-model="craneOpType">
-            <el-option label="起吊(FETCH)" value="FETCH" />
-            <el-option label="放箱(PUT)" value="PUT" />
+            <el-option label="抓箱(FETCH_DONE)" value="FETCH_DONE" />
+            <el-option label="放箱(PUT_DONE)" value="PUT_DONE" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="耗时(毫秒)">
+          <el-input-number v-model="craneOpDuration" :min="100" :max="60000" :step="100" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showCraneOpDialog = false">取消</el-button>
         <el-button type="primary" @click="handleCraneOperate">确认操作</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 集卡充电对话框 -->
+    <el-dialog v-model="showChargeDialog" title="集卡充电控制" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="充电桩">
+          <el-select v-model="chargeStationId" placeholder="请选择充电桩" filterable>
+            <el-option v-for="station in simStore.chargingStations" :key="station.stationCode" :label="station.stationCode" :value="station.stationCode">
+              <span>{{ station.stationCode }}</span>
+              <span style="float: right; color: #8492a6; font-size: 12px;">{{ station.status }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="无充电桩" v-if="simStore.chargingStations.length === 0">
+          <span style="color: #909399;">当前场景无可用充电桩，请先加载包含充电桩的场景</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showChargeDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleCharge" :disabled="!chargeStationId">确认充电</el-button>
       </template>
     </el-dialog>
   </div>
@@ -219,6 +243,7 @@ const logContainer = ref<HTMLElement | null>(null)
 const showTruckMoveDialog = ref(false)
 const showCraneMoveDialog = ref(false)
 const showCraneOpDialog = ref(false)
+const showChargeDialog = ref(false)
 
 // 集卡移动参数
 const truckMoveTarget = ref({ x: 0, y: 0, speed: 10 })
@@ -229,7 +254,11 @@ const craneMoveDistance = ref(0)
 const craneMoveSpeed = ref(10)
 
 // 起重机操作参数
-const craneOpType = ref('FETCH')
+const craneOpType = ref('FETCH_DONE')
+const craneOpDuration = ref(5000)
+
+// 充电参数
+const chargeStationId = ref('')
 
 // 专门用于动画渲染的设备数组
 const displayDevices = ref<Record<string, any>>({})
@@ -272,6 +301,7 @@ const animateLoop = () => {
 
 onMounted(() => {
   simStore.updateSnapshot()
+  simStore.loadMapPaths() // 加载地图路径配置
   // 启动轮询
   timer = setInterval(() => { if (!simStore.isPlaying) simStore.updateSnapshot() }, 1000)
   // 启动动画引擎
@@ -302,12 +332,37 @@ const selectDevice = (id: string, type: string) => {
   if (device) {
     selectedDeviceState.value = device.state
     selectedDevicePower.value = device.powerLevel || null
+    // 设置集卡默认目标为当前位置
+    if (type === 'ELECTRIC_TRUCK' || type === 'INTERNAL_TRUCK') {
+      truckMoveTarget.value = { x: Math.round(device.posX), y: Math.round(device.posY), speed: 10 }
+    }
+    // 设置起重机默认距离为0
+    if (type === 'QC' || type === 'ASC') {
+      craneMoveDistance.value = 0
+      craneMoveSpeed.value = 10
+    }
   }
+  // 清空充电站选择
+  chargeStationId.value = ''
   simStore.setSelectedDevice(device)
 }
 
 // 集卡移动
 const handleTruckMove = async () => {
+  const dx = truckMoveTarget.value.x - (simStore.devices.find(d => d.id === selectedDeviceId.value)?.posX || 0)
+  const dy = truckMoveTarget.value.y - (simStore.devices.find(d => d.id === selectedDeviceId.value)?.posY || 0)
+  const distance = Math.sqrt(dx * dx + dy * dy)
+
+  if (distance < 1) {
+    ElMessage.warning('目标位置与当前位置相同，无需移动')
+    return
+  }
+
+  if (truckMoveTarget.value.speed <= 0) {
+    ElMessage.warning('请输入有效的速度')
+    return
+  }
+
   try {
     await moveTruck({
       truckId: selectedDeviceId.value,
@@ -344,7 +399,8 @@ const handleCraneOperate = async () => {
   try {
     await operateCrane({
       craneId: selectedDeviceId.value,
-      operation: craneOpType.value
+      action: craneOpType.value,
+      durationMS: craneOpDuration.value
     })
     ElMessage.success('操作指令已下发')
     showCraneOpDialog.value = false
@@ -358,9 +414,11 @@ const handleCraneOperate = async () => {
 const handleCharge = async () => {
   try {
     await chargeTruck({
-      truckId: selectedDeviceId.value
+      truckId: selectedDeviceId.value,
+      stationId: chargeStationId.value
     })
     ElMessage.success('充电指令已下发')
+    showChargeDialog.value = false
     await simStore.updateSnapshot()
   } catch (err: any) {
     ElMessage.error(err.message || '充电指令失败')
@@ -370,19 +428,112 @@ const handleCharge = async () => {
 // 围栏控制
 const toggleFence = async (fence: any) => {
   try {
-    const newStatus = fence.status === 'OPEN' ? 'CLOSED' : 'OPEN'
+    // 后端状态: "01"=禁止通行(BLOCKED), "02"=通行(PASSABLE)
+    // 当前是 "01" 就改成 "02"，反之亦然
+    const newStatus = fence.status === '01' ? '02' : '01'
     await controlFence({
-      nodeId: fence.nodeId,
+      fenceId: fence.nodeId,  // 使用 nodeId 作为 fenceId
       status: newStatus
     })
-    ElMessage.success(`围栏已${newStatus === 'OPEN' ? '开启' : '关闭'}`)
+    ElMessage.success(`围栏已${newStatus === '02' ? '开启' : '关闭'}`)
     await simStore.updateSnapshot()
   } catch (err: any) {
     ElMessage.error(err.message || '围栏控制失败')
   }
 }
 
-// 约束寻路算法
+// ==================== 路径验证函数 ====================
+
+// 从地图配置中获取指定类型的路径
+const getPathsByType = (pathType: string) => {
+  return simStore.mapPaths.filter(p => p.pathType === pathType);
+};
+
+// QC(桥吊) 只能在水平轨道上移动
+const isValidQCPosition = (x: number, y: number): boolean => {
+  const qcPaths = getPathsByType('QC_RAIL');
+  if (qcPaths.length === 0) {
+    console.warn('未配置QC_RAIL路径，使用默认验证');
+    return Math.abs(y - 140) < 5; // 默认值
+  }
+  return qcPaths.some(path => {
+    if (path.direction !== 'HORIZONTAL') return false;
+    return Math.abs(y - path.position) < 5 && x >= path.startPoint && x <= path.endPoint;
+  });
+};
+
+// ASC(龙门吊) 只能在垂直轨道上移动
+const isValidASCPosition = (x: number, y: number): boolean => {
+  const ascPaths = getPathsByType('ASC_RAIL');
+  if (ascPaths.length === 0) {
+    console.warn('未配置ASC_RAIL路径，使用默认验证');
+    return [175, 425, 675].some(rail => Math.abs(x - rail) < 5); // 默认值
+  }
+  return ascPaths.some(path => {
+    if (path.direction !== 'VERTICAL') return false;
+    return Math.abs(x - path.position) < 5 && y >= path.startPoint && y <= path.endPoint;
+  });
+};
+
+// 集卡只能在道路网格上移动
+const isValidTruckPosition = (x: number, y: number): boolean => {
+  const truckPaths = getPathsByType('TRUCK_ROAD');
+  if (truckPaths.length === 0) {
+    console.warn('未配置TRUCK_ROAD路径，使用默认验证');
+    const hRoads = [200, 550];
+    const vRoads = [50, 300, 550, 750];
+    return hRoads.some(road => Math.abs(y - road) < 5) || vRoads.some(road => Math.abs(x - road) < 5);
+  }
+  return truckPaths.some(path => {
+    if (path.direction === 'HORIZONTAL') {
+      return Math.abs(y - path.position) < 5 && x >= path.startPoint && x <= path.endPoint;
+    } else if (path.direction === 'VERTICAL') {
+      return Math.abs(x - path.position) < 5 && y >= path.startPoint && y <= path.endPoint;
+    }
+    return false;
+  });
+};
+
+// 验证设备移动目标是否在有效路径上
+const validateMoveTarget = (deviceType: string, x: number, y: number): string | null => {
+  if (deviceType === 'QC' || deviceType === 'CRANE_QC') {
+    if (!isValidQCPosition(x, y)) {
+      const qcPaths = getPathsByType('QC_RAIL');
+      if (qcPaths.length > 0) {
+        const positions = qcPaths.map(p => `y=${p.position}`).join(', ');
+        return `QC(桥吊)只能在水平轨道(${positions})上移动，当前位置(${Math.round(x)}, ${Math.round(y)})不在轨道上`;
+      }
+      return `QC(桥吊)移动位置(${Math.round(x)}, ${Math.round(y)})无效`;
+    }
+  } else if (deviceType === 'ASC' || deviceType === 'CRANE_ASC') {
+    if (!isValidASCPosition(x, y)) {
+      const ascPaths = getPathsByType('ASC_RAIL');
+      if (ascPaths.length > 0) {
+        const positions = ascPaths.map(p => `x=${p.position}`).join(', ');
+        return `ASC(龙门吊)只能在垂直轨道(${positions})上移动，当前位置(${Math.round(x)}, ${Math.round(y)})不在轨道上`;
+      }
+      return `ASC(龙门吊)移动位置(${Math.round(x)}, ${Math.round(y)})无效`;
+    }
+  } else if (deviceType === 'ELECTRIC_TRUCK' || deviceType === 'INTERNAL_TRUCK' || deviceType === 'TRUCK') {
+    if (!isValidTruckPosition(x, y)) {
+      const truckPaths = getPathsByType('TRUCK_ROAD');
+      if (truckPaths.length > 0) {
+        const hPaths = truckPaths.filter(p => p.direction === 'HORIZONTAL').map(p => `y=${p.position}`);
+        const vPaths = truckPaths.filter(p => p.direction === 'VERTICAL').map(p => `x=${p.position}`);
+        const positionInfo = [...hPaths, ...vPaths].join(', ');
+        return `集卡只能在道路网格(${positionInfo})上移动，当前位置(${Math.round(x)}, ${Math.round(y)})不在道路上`;
+      }
+      return `集卡移动位置(${Math.round(x)}, ${Math.round(y)})无效，不在道路上`;
+    }
+  }
+  return null;
+};
+
+// ==================== 设备移动处理 ====================
+
+// ==================== 设备移动处理 ====================
+
+// 约束寻路算法 - 设备移动
 const handleStageClick = async (e: any) => {
   if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
   const pos = e.target.getStage().getPointerPosition();
@@ -391,20 +542,81 @@ const handleStageClick = async (e: any) => {
 
   try {
     if (selectedDeviceType.value === 'QC') {
-      const distance = pos.x - device.posX;
-      await moveCrane({ craneId: device.id, moveType: "MOVE_HORIZONTAL", distance: distance, speed: 10.0 });
+      // QC(桥吊): 只能在水平轨道上移动(y=140)
+      const targetX = Math.max(0, Math.min(800, pos.x));
+      const targetY = 140; // 固定在轨道上
+
+      // 验证目标位置
+      const error = validateMoveTarget('QC', targetX, targetY);
+      if (error) {
+        ElMessage.warning(error);
+        return;
+      }
+
+      const distance = targetX - device.posX;
+      if (Math.abs(distance) > 1) {
+        await moveCrane({
+          craneId: device.id,
+          moveType: "MOVE_HORIZONTAL",
+          distance: distance,
+          speed: 10.0
+        });
+      }
     } else if (selectedDeviceType.value === 'ASC') {
-      const distance = pos.y - device.posY;
-      await moveCrane({ craneId: device.id, moveType: "MOVE_VERTICAL", distance: distance, speed: 10.0 });
+      // ASC(龙门吊): 只能在垂直轨道上移动(x=175,425,675)
+      const ascRails = [175, 425, 675];
+      const nearestRail = ascRails.reduce((prev, curr) =>
+          Math.abs(curr - device.posX) < Math.abs(prev - device.posX) ? curr : prev
+      );
+      const targetX = nearestRail;
+      const targetY = Math.max(200, Math.min(550, pos.y));
+
+      // 验证目标位置
+      const error = validateMoveTarget('ASC', targetX, targetY);
+      if (error) {
+        ElMessage.warning(error);
+        return;
+      }
+
+      const distance = targetY - device.posY;
+      if (Math.abs(distance) > 1) {
+        await moveCrane({
+          craneId: device.id,
+          moveType: "MOVE_VERTICAL",
+          distance: distance,
+          speed: 10.0
+        });
+      }
     } else {
-      const hRoads = [200, 550]; const vRoads = [50, 300, 550, 750];
+      // 集卡: 只能在道路网格上移动
+      const hRoads = [200, 550];
+      const vRoads = [50, 300, 550, 750];
       const nearestH = hRoads.reduce((prev, curr) => Math.abs(curr - pos.y) < Math.abs(prev - pos.y) ? curr : prev);
       const nearestV = vRoads.reduce((prev, curr) => Math.abs(curr - pos.x) < Math.abs(prev - pos.x) ? curr : prev);
-      let targetX = pos.x; let targetY = pos.y;
-      if (Math.abs(nearestH - pos.y) < Math.abs(nearestV - pos.x)) { targetY = nearestH; } else { targetX = nearestV; }
+
+      let targetX = pos.x;
+      let targetY = pos.y;
+      if (Math.abs(nearestH - pos.y) < Math.abs(nearestV - pos.x)) {
+        targetY = nearestH;
+        targetX = nearestV; // 也要对齐到垂直道路
+      } else {
+        targetX = nearestV;
+        targetY = nearestH; // 也要对齐到水平道路
+      }
+
+      // 验证目标位置
+      const error = validateMoveTarget(selectedDeviceType.value, targetX, targetY);
+      if (error) {
+        ElMessage.warning(error);
+        return;
+      }
+
       await moveTruck({ truckId: device.id, targetPoint: { x: targetX, y: targetY }, speed: 10.0 });
     }
-  } catch (err) {}
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '移动失败')
+  }
 }
 
 const handleStep = () => { simStore.doStepNext() }

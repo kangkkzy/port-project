@@ -4,6 +4,17 @@ import request from './request.ts';
 // 获取当前仿真快照 (设备坐标、状态等)
 export const getSnapshot = () => request.get('/state/snapshot');
 
+// ================= 地图配置 =================
+// 获取所有路径配置
+export const getMapPaths = () => request.get('/map/paths');
+
+// 获取路径配置Map
+export const getMapPathsMap = () => request.get('/map/paths/map');
+
+// 验证位置是否在有效路径上
+export const validatePosition = (deviceType: string, x: number, y: number) =>
+    request.get('/map/validate', { params: { deviceType, x, y } });
+
 // ================= 指令控制 =================
 // 单步推进下一个事件
 export const stepNextEvent = () => request.post('/command/step/next-event');

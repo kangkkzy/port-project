@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia';
 // 导入了 getEvents
-import { getSnapshot, stepNextEvent, resetSimulation, getEvents, getErrors, getAllErrors, getSuspendedChains } from '../api/simulation';
+import { getSnapshot, stepNextEvent, resetSimulation, getEvents, getErrors, getAllErrors, getSuspendedChains, getMapPaths } from '../api/simulation';
+
+export interface MapPath {
+    pathType: string;
+    direction: string;
+    position: number;
+    startPoint: number;
+    endPoint: number;
+    keyPoints?: number[];
+}
 
 export const useSimStore = defineStore('simulation', {
     state: () => ({
@@ -16,6 +25,8 @@ export const useSimStore = defineStore('simulation', {
         isPlaying: false,
         playInterval: null as any,
         selectedDevice: null as any,
+        // 地图路径配置
+        mapPaths: [] as MapPath[],
     }),
 
     actions: {
@@ -149,6 +160,17 @@ export const useSimStore = defineStore('simulation', {
         // 清除选中的设备
         clearSelectedDevice() {
             this.selectedDevice = null;
+        },
+
+        // 加载地图路径配置
+        async loadMapPaths() {
+            try {
+                const paths = await getMapPaths();
+                this.mapPaths = paths || [];
+                console.log('地图路径配置已加载:', this.mapPaths.length, '条');
+            } catch (error) {
+                console.error('加载地图路径配置失败', error);
+            }
         }
     }
 });

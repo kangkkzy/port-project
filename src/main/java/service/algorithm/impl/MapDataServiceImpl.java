@@ -3,9 +3,12 @@ package service.algorithm.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import common.exception.BusinessException;
 import model.dto.config.MapConfigDto;
+import model.dto.config.MapPathDto;
 import org.springframework.stereotype.Service;
 import service.algorithm.MapDataService;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -21,6 +24,7 @@ public class MapDataServiceImpl implements MapDataService {
     // 内存缓存
     private final Map<String, Double> coordinateCache = new ConcurrentHashMap<>();
     private final Map<String, Double> parameterCache = new ConcurrentHashMap<>();
+    private final List<MapPathDto> pathList = new ArrayList<>();
 
     @Override
     public void loadMapConfiguration(String jsonConfig) {
@@ -37,6 +41,13 @@ public class MapDataServiceImpl implements MapDataService {
                 parameterCache.clear();
                 parameterCache.putAll(config.getParameters());
                 System.out.println(">>> [MapData] 参数配置已加载: " + config.getParameters());
+            }
+
+            // 加载路径配置
+            if (config.getPaths() != null) {
+                pathList.clear();
+                pathList.addAll(config.getPaths());
+                System.out.println(">>> [MapData] 路径配置已加载: " + config.getPaths().size() + " 条");
             }
 
         } catch (Exception e) {
@@ -71,5 +82,46 @@ public class MapDataServiceImpl implements MapDataService {
             throw new BusinessException("致命错误: 缺少关键算法参数配置 [" + key + "]");
         }
         return parameterCache.get(key);
+    }
+
+    @Override
+    public List<MapPathDto> getAllPaths() {
+        return new ArrayList<>(pathList);
+    }
+
+    @Override
+    public boolean isPositionOnPath(String deviceType, double x, double y) {
+        // 设备类型映射
+        String targetPathType;
+        if ("QC".equalsIgnoreCase(deviceType) || "CRANE_QC".equalsIgnoreCase(deviceType)) {
+            targetPathType = "QC_RAIL";
+        } else if ("ASC".equalsIgnoreCase(deviceType) || "CRANE_ASC".equalsIgnoreCase(deviceType)) {
+            targetPathType = "ASC_RAIL";
+        } else if ("ELECTRIC_TRUCK".equalsIgnoreCase(deviceType) || "INTERNAL_TRUCK".equalsIgnoreCase(deviceType) || "TRUCK".equalsIgnoreCase(deviceType)) {
+            targetPathType = "TRUCK_ROAD";
+        } else {
+            return false;
+        }
+
+        for (MapPathDto path : pathList) {
+            if (!path.getPathType().equals(targetPathType)) {
+                continue;
+            }
+
+            // 验证坐标是否在路径范围内
+            if ("HORIZONTAL".equals(path.getDirection())) {
+                // 水平路径：检查Y坐标是否在路径上，X坐标是否在起止范围内
+                if (Math.abs(y - path.getPosition()) < 5 && x >= path.getStartPoint() && x <= path.getEndPoint()) {
+                    return true;
+                }
+            } else if ("VERTICAL".equals(path.getDirection())) {
+                // 垂直路径：检查X坐标是否在路径上，Y坐标是否在起止范围内
+                if (Math.abs(x - path.getPosition()) < 5 && y >= path.getStartPoint() && y <= path.getEndPoint()) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

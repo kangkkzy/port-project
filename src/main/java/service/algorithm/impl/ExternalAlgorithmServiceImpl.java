@@ -17,6 +17,7 @@ import model.entity.Truck;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import service.algorithm.ExternalAlgorithmApi;
+import service.algorithm.MapDataService;
 import service.algorithm.TaskDecisionService;
 
 import java.util.HashMap;
@@ -31,12 +32,15 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
     private final GlobalContext context = GlobalContext.getInstance();
     private final SimulationEngine engine;
     private final TaskDecisionService taskDecisionService;
+    private final MapDataService mapDataService;
 
     @Autowired
     public ExternalAlgorithmServiceImpl(SimulationEngine engine,
-                                        TaskDecisionService taskDecisionService) {
+                                        TaskDecisionService taskDecisionService,
+                                        MapDataService mapDataService) {
         this.engine = engine;
         this.taskDecisionService = taskDecisionService;
+        this.mapDataService = mapDataService;
     }
 
     /**
@@ -57,6 +61,18 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             //  目标点必须由外部指定
             if (req.getTargetPoint() == null) {
                 throw new BusinessException("移动指令错误: 必须明确指定目标坐标 (targetPoint)");
+            }
+
+            //  验证目标点是否在有效路径上
+            double targetX = req.getTargetPoint().getX();
+            double targetY = req.getTargetPoint().getY();
+            String deviceType = device.getType();
+
+            if (!mapDataService.isPositionOnPath(deviceType, targetX, targetY)) {
+                throw new BusinessException(String.format(
+                        "集卡移动指令错误: 目标位置 (%.1f, %.1f) 不在有效道路路径上，设备类型: %s",
+                        targetX, targetY, deviceType
+                ));
             }
 
             //  构造事件负载
@@ -84,7 +100,8 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
                 throw new BusinessException("起重机移动指令错误: 必须明确指定速度 (speed)");
             }
 
-            if (req.getDistance() == null || req.getDistance() <= 0) {
+            // 距离可以為負值(向相反方向移動)，但不能為null
+            if (req.getDistance() == null) {
                 throw new BusinessException("起重机移动指令错误: 必须明确指定距离 (distance)");
             }
 
