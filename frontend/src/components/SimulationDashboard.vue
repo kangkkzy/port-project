@@ -41,7 +41,6 @@
               <v-line :config="{ points: [550, 200, 550, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [750, 200, 750, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
 
-              <!-- 围栏显示: "02"=通行(绿色), "01"=禁止通行(红色) -->
               <v-circle v-for="fence in simStore.fences" :key="fence.nodeId"
                         :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
             </v-layer>
@@ -76,7 +75,6 @@
       </div>
 
       <div class="right-section">
-        <!-- 设备列表 -->
         <div class="info-panel">
           <h3>实时设备状态 (共 {{ simStore.devices.length }} 台)</h3>
           <ul class="device-list">
@@ -89,7 +87,6 @@
           </ul>
         </div>
 
-        <!-- 选中设备控制面板 -->
         <div class="control-panel" v-if="selectedDeviceId">
           <h3>设备控制 - {{ selectedDeviceId }}</h3>
           <div class="control-info">
@@ -106,7 +103,6 @@
           </div>
         </div>
 
-        <!-- 围栏状态 -->
         <div class="fence-panel" v-if="simStore.fences.length > 0">
           <h3>围栏状态 (共 {{ simStore.fences.length }} 个)</h3>
           <ul class="fence-list">
@@ -118,7 +114,6 @@
           </ul>
         </div>
 
-        <!-- 作业指令 -->
         <div class="wi-panel" v-if="simStore.workInstructions.length > 0">
           <h3>作业指令 (共 {{ simStore.workInstructions.length }} 条)</h3>
           <ul class="wi-list">
@@ -130,7 +125,6 @@
           </ul>
         </div>
 
-        <!-- 错误日志 -->
         <div class="error-panel" v-if="simStore.errors.length > 0">
           <h3>错误日志 (共 {{ simStore.errors.length }} 条)</h3>
           <ul class="error-list">
@@ -143,7 +137,6 @@
       </div>
     </div>
 
-    <!-- 集卡移动对话框 -->
     <el-dialog v-model="showTruckMoveDialog" title="集卡移动控制" width="400px">
       <el-form label-width="80px">
         <el-form-item label="目标X">
@@ -162,7 +155,6 @@
       </template>
     </el-dialog>
 
-    <!-- 桥吊/龙门吊移动对话框 -->
     <el-dialog v-model="showCraneMoveDialog" title="起重机移动控制" width="400px">
       <el-form label-width="80px">
         <el-form-item label="移动类型">
@@ -184,7 +176,6 @@
       </template>
     </el-dialog>
 
-    <!-- 起重机操作对话框 -->
     <el-dialog v-model="showCraneOpDialog" title="起重机操作控制" width="400px">
       <el-form label-width="80px">
         <el-form-item label="操作类型">
@@ -203,7 +194,6 @@
       </template>
     </el-dialog>
 
-    <!-- 集卡充电对话框 -->
     <el-dialog v-model="showChargeDialog" title="集卡充电控制" width="400px">
       <el-form label-width="80px">
         <el-form-item label="充电桩">
@@ -562,8 +552,6 @@ const validateMoveTarget = (deviceType: string, x: number, y: number): string | 
 
 // ==================== 设备移动处理 ====================
 
-// ==================== 设备移动处理 ====================
-
 // 约束寻路算法 - 设备移动
 const handleStageClick = async (e: any) => {
   if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
@@ -665,11 +653,8 @@ const handleTestTruckDelivery = async () => {
     await handleLoadMockData()
     // 触发后端集卡配送流程测试
     const res = await testTruckDelivery()
-    if (res.code === 200) {
-      ElMessage.success(res.message || '集卡配送流程已启动')
-    } else {
-      ElMessage.warning(res.message || '启动失败')
-    }
+    // 因为 request.ts 拦截器成功时直接返回 res.data，如果代码走到这里，说明后端一定返回了 code: 200
+    ElMessage.success(typeof res === 'string' ? res : '集卡配送流程已启动')
   } catch (err: any) {
     ElMessage.error(err.message || '测试启动失败')
   }
@@ -680,11 +665,7 @@ const handleTestQcOperation = async () => {
   try {
     await handleLoadMockData()
     const res = await testQcOperation()
-    if (res.code === 200) {
-      ElMessage.success(res.message || '桥吊作业流程已启动')
-    } else {
-      ElMessage.warning(res.message || '启动失败')
-    }
+    ElMessage.success(typeof res === 'string' ? res : '桥吊作业流程已启动')
   } catch (err: any) {
     ElMessage.error(err.message || '测试启动失败')
   }
@@ -695,11 +676,7 @@ const handleTestAscOperation = async () => {
   try {
     await handleLoadMockData()
     const res = await testAscOperation()
-    if (res.code === 200) {
-      ElMessage.success(res.message || '龙门吊作业流程已启动')
-    } else {
-      ElMessage.warning(res.message || '启动失败')
-    }
+    ElMessage.success(typeof res === 'string' ? res : '龙门吊作业流程已启动')
   } catch (err: any) {
     ElMessage.error(err.message || '测试启动失败')
   }

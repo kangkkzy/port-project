@@ -12,8 +12,6 @@ import model.entity.BaseDevice;
 import model.entity.Point;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-
 /**
  * 吊具移动指令
  */
@@ -26,7 +24,6 @@ public class CmdCraneMoveHandler implements SimEventHandler {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
         String craneId = event.getPrimarySubject("CRANE");
         BaseDevice device = context.getDevice(craneId);
@@ -36,9 +33,9 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             throw new BusinessException(String.format("设备 %s 正在作业中，无法执行移动", craneId));
         }
 
-        Map<String, Object> payload = (Map<String, Object>) event.getData();
-        CraneMoveReq req = (CraneMoveReq) payload.get("req");
-        Double speed = (Double) payload.get("speed");
+        // 🟢 修改点：直接将载荷转为 CraneMoveReq 对象
+        CraneMoveReq req = (CraneMoveReq) event.getData();
+        Double speed = req.getSpeed();
         if (speed == null || speed <= 0) {
             throw new BusinessException("speed 参数无效");
         }
@@ -63,5 +60,3 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         moveStart.addSubject("CRANE", craneId);
     }
 }
-
-

@@ -10,14 +10,16 @@ import model.entity.AscDevice;
 import model.entity.Point;
 import model.entity.QcDevice;
 import model.entity.Truck;
+import model.dto.request.CraneMoveReq;
+import model.dto.request.CraneOperationReq;
+import model.dto.request.MoveCommandReq;
+
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 仿真测试场景接口 - 用于演示和调试
@@ -25,7 +27,7 @@ import java.util.Map;
  * 提供完整的业务流程测试场景，可通过前端按钮触发
  */
 @RestController
-@RequestMapping("/sim/test") // 修改了这里：增加了 /sim 前缀
+@RequestMapping("/sim/test")
 public class SimTestController {
 
     private final SimulationEngine engine;
@@ -42,7 +44,6 @@ public class SimTestController {
     public Result testTruckDelivery() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 检查设备是否存在
         Truck truck = ctx.getTruckMap().get("TRUCK_01");
         if (truck == null) {
             return Result.error("请先加载包含 TRUCK_01 的测试场景");
@@ -53,7 +54,6 @@ public class SimTestController {
         truck.setCurrentTargetPos(null);
         truck.setRemainingMoveTargets(new ArrayList<>());
 
-        // 构建任务列表
         List<String> wiList = new ArrayList<>();
         wiList.add("WI_TEST_001");
         truck.setNotDoneWiList(wiList);
@@ -61,129 +61,118 @@ public class SimTestController {
         // ======== 调度事件链 ========
         long baseTime = ctx.getSimTime();
 
-        // 事件1: 集卡从当前位置出发，驶向道路 (175, 200)
+        // 1. 集卡出发 (125米, 速度20 -> 耗时约 6.25秒)
         SimEvent event1 = createMoveEvent(baseTime, "TRUCK_01", 175.0, 200.0, 20.0);
 
-        // 事件2: 到达道路后继续前往桥吊 (400, 200)
-        SimEvent event2 = createMoveEvent(baseTime + 100, "TRUCK_01", 400.0, 200.0, 20.0);
+        // 2. 7秒后，继续前往桥吊 (225米, 速度20 -> 耗时约 11.25秒)
+        SimEvent event2 = createMoveEvent(baseTime + 7000, "TRUCK_01", 400.0, 200.0, 20.0);
 
-        // 事件3: 到达桥吊下 (400, 140)
-        SimEvent event3 = createMoveEvent(baseTime + 200, "TRUCK_01", 400.0, 140.0, 15.0);
+        // 3. 20秒后，拐弯到桥吊下 (60米, 速度15 -> 耗时 4秒)
+        SimEvent event3 = createMoveEvent(baseTime + 20000, "TRUCK_01", 400.0, 140.0, 15.0);
 
-        // 事件4: 卸箱操作 (模拟)
-        SimEvent event4 = createCraneOperateEvent(baseTime + 300, "QC_01", "TRUCK_01", "PUT_DONE", 5000);
+        // 4. 25秒后，QC卸箱作业 (耗时 5秒)
+        SimEvent event4 = createCraneOperateEvent(baseTime + 25000, "QC_01", "TRUCK_01", "PUT_DONE", 5000);
 
-        // 事件5: 集卡返回道路 (400, 200)
-        SimEvent event5 = createMoveEvent(baseTime + 400, "TRUCK_01", 400.0, 200.0, 20.0);
+        // 5. 31秒后，集卡驶出回到主路 (60米, 速度20 -> 耗时 3秒)
+        SimEvent event5 = createMoveEvent(baseTime + 31000, "TRUCK_01", 400.0, 200.0, 20.0);
 
-        // 事件6: 前往堆场B道路 (675, 200)
-        SimEvent event6 = createMoveEvent(baseTime + 500, "TRUCK_01", 675.0, 200.0, 20.0);
+        // 6. 35秒后，开往堆场B道路 (275米, 速度20 -> 耗时约 13.75秒)
+        SimEvent event6 = createMoveEvent(baseTime + 35000, "TRUCK_01", 675.0, 200.0, 20.0);
 
-        // 事件7: 到达堆场B (675, 300)
-        SimEvent event7 = createMoveEvent(baseTime + 600, "TRUCK_01", 675.0, 300.0, 15.0);
+        // 7. 50秒后，到达堆场B里面 (100米, 速度15 -> 耗时约 6.6秒)
+        SimEvent event7 = createMoveEvent(baseTime + 50000, "TRUCK_01", 675.0, 300.0, 15.0);
 
-        // 事件8: 装货操作 (模拟)
-        SimEvent event8 = createCraneOperateEvent(baseTime + 700, "ASC_01", "TRUCK_01", "FETCH_DONE", 5000);
+        // 8. 58秒后，ASC装货作业 (耗时 5秒)
+        SimEvent event8 = createCraneOperateEvent(baseTime + 58000, "ASC_01", "TRUCK_01", "FETCH_DONE", 5000);
 
-        return Result.success("已调度集卡完整业务流程测试，共8个事件");
+        return Result.success("已调度集卡完整业务流程测试，预计仿真时间跨度60秒左右");
     }
 
     /**
      * 执行桥吊QC业务流程测试
-     * 场景：QC_01 从当前位置移动到目标位置，执行抓箱/放箱操作
      */
     @PostMapping("/qc-operation")
     public Result testQcOperation() {
         GlobalContext ctx = GlobalContext.getInstance();
-
         QcDevice qc = ctx.getQcMap().get("QC_01");
-        if (qc == null) {
-            return Result.error("请先加载包含 QC_01 的测试场景");
-        }
+        if (qc == null) return Result.error("请先加载包含 QC_01 的测试场景");
+
+        qc.setState(DeviceStateEnum.IDLE);
 
         long baseTime = ctx.getSimTime();
 
-        // 事件1: QC 移动到新位置
+        // 1. 移动 (距离100, 速度10 -> 耗时 10秒)
         SimEvent event1 = createCraneMoveEvent(baseTime, "QC_01", "MOVE_HORIZONTAL", 100.0, 10.0);
 
-        // 事件2: 执行放箱操作
-        SimEvent event2 = createCraneOperateEvent(baseTime + 100, "QC_01", null, "PUT_DONE", 5000);
+        // 2. 11秒后，执行放箱操作 (耗时 5秒)
+        SimEvent event2 = createCraneOperateEvent(baseTime + 11000, "QC_01", null, "PUT_DONE", 5000);
 
-        // 事件3: QC 移动到另一个位置
-        SimEvent event3 = createCraneMoveEvent(baseTime + 200, "QC_01", "MOVE_HORIZONTAL", -50.0, 10.0);
+        // 3. 17秒后，反向移动 (距离50, 速度10 -> 耗时 5秒)
+        SimEvent event3 = createCraneMoveEvent(baseTime + 17000, "QC_01", "MOVE_HORIZONTAL", -50.0, 10.0);
 
-        // 事件4: 执行抓箱操作
-        SimEvent event4 = createCraneOperateEvent(baseTime + 300, "QC_01", null, "FETCH_DONE", 5000);
+        // 4. 23秒后，执行抓箱操作 (耗时 5秒)
+        SimEvent event4 = createCraneOperateEvent(baseTime + 23000, "QC_01", null, "FETCH_DONE", 5000);
 
         return Result.success("已调度QC桥吊业务流程测试，共4个事件");
     }
 
     /**
      * 执行龙门吊ASC业务流程测试
-     * 场景：ASC_01 执行堆场内的箱子搬运
      */
     @PostMapping("/asc-operation")
     public Result testAscOperation() {
         GlobalContext ctx = GlobalContext.getInstance();
-
         AscDevice asc = ctx.getAscMap().get("ASC_01");
-        if (asc == null) {
-            return Result.error("请先加载包含 ASC_01 的测试场景");
-        }
+        if (asc == null) return Result.error("请先加载包含 ASC_01 的测试场景");
 
+        asc.setState(DeviceStateEnum.IDLE);
         long baseTime = ctx.getSimTime();
 
-        // 事件1: ASC 移动到新位置
+        // 1. 移动 (距离50, 速度8 -> 耗时 6.25秒)
         SimEvent event1 = createCraneMoveEvent(baseTime, "ASC_01", "MOVE_VERTICAL", 50.0, 8.0);
 
-        // 事件2: 执行抓箱操作
-        SimEvent event2 = createCraneOperateEvent(baseTime + 100, "ASC_01", null, "FETCH_DONE", 3000);
+        // 2. 7.5秒后，执行抓箱操作 (耗时 3秒)
+        SimEvent event2 = createCraneOperateEvent(baseTime + 7500, "ASC_01", null, "FETCH_DONE", 3000);
 
-        // 事件3: ASC 移动到目标位置
-        SimEvent event3 = createCraneMoveEvent(baseTime + 200, "ASC_01", "MOVE_VERTICAL", -30.0, 8.0);
+        // 3. 11.5秒后，移动到目标位置 (距离30, 速度8 -> 耗时 3.75秒)
+        SimEvent event3 = createCraneMoveEvent(baseTime + 11500, "ASC_01", "MOVE_VERTICAL", -30.0, 8.0);
 
-        // 事件4: 执行放箱操作
-        SimEvent event4 = createCraneOperateEvent(baseTime + 300, "ASC_01", null, "PUT_DONE", 3000);
+        // 4. 16秒后，执行放箱操作 (耗时 3秒)
+        SimEvent event4 = createCraneOperateEvent(baseTime + 16000, "ASC_01", null, "PUT_DONE", 3000);
 
         return Result.success("已调度ASC龙门吊业务流程测试，共4个事件");
     }
 
     // ==================== 辅助方法 ====================
 
-    /**
-     * 创建集卡移动事件
-     */
     private SimEvent createMoveEvent(long time, String truckId, double targetX, double targetY, double speed) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("speed", speed);
-        payload.put("target", new Point(targetX, targetY));
+        MoveCommandReq payload = new MoveCommandReq();
+        payload.setTruckId(truckId);
+        payload.setTargetPoint(new Point(targetX, targetY));
+        payload.setSpeed(speed);
 
         SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_MOVE, payload);
         event.addSubject("TRUCK", truckId);
         return event;
     }
 
-    /**
-     * 创建起重机移动事件
-     */
     private SimEvent createCraneMoveEvent(long time, String craneId, String moveType, double distance, double speed) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("moveType", moveType);
-        payload.put("distance", distance);
-        payload.put("speed", speed);
+        CraneMoveReq payload = new CraneMoveReq();
+        payload.setCraneId(craneId);
+        payload.setMoveType(DeviceStateEnum.valueOf(moveType));
+        payload.setDistance(distance);
+        payload.setSpeed(speed);
 
         SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_MOVE, payload);
         event.addSubject("CRANE", craneId);
         return event;
     }
 
-    /**
-     * 创建起重机操作事件
-     */
     private SimEvent createCraneOperateEvent(long time, String craneId, String truckId, String action, int durationMs) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", action);
-        payload.put("durationMS", durationMs);
+        CraneOperationReq payload = new CraneOperationReq();
+        payload.setCraneId(craneId);
+        payload.setAction(EventTypeEnum.valueOf(action));
+        payload.setDurationMS(durationMs);
 
         SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_OP, payload);
         event.addSubject("CRANE", craneId);
