@@ -25,7 +25,7 @@ import java.util.Map;
  * 提供完整的业务流程测试场景，可通过前端按钮触发
  */
 @RestController
-@RequestMapping("/test")
+@RequestMapping("/sim/test") // 修改了这里：增加了 /sim 前缀
 public class SimTestController {
 
     private final SimulationEngine engine;
