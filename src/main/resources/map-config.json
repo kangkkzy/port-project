@@ -1,0 +1,99 @@
+{
+  "coordinates": {
+    "BAY01": 20.0,
+    "BAY02": 40.0,
+    "BAY03": 60.0,
+    "BAY04": 80.0,
+    "YARD01": 100.0,
+    "GATE": 500.0
+  },
+  "parameters": {
+    "minQcDistance": 15.0,
+    "truckSpeed": 5.0,
+    "qcSpeed": 0.8,
+    "ascSpeed": 0.5,
+    "maxSyncWaitMs": 900000.0
+  },
+  "paths": [
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 200.0,
+      "startPoint": 0.0,
+      "endPoint": 800.0,
+      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 550.0,
+      "startPoint": 0.0,
+      "endPoint": 800.0,
+      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 50.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 300.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 550.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 750.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "QC_RAIL",
+      "direction": "HORIZONTAL",
+      "position": 140.0,
+      "startPoint": 0.0,
+      "endPoint": 800.0,
+      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+    },
+    {
+      "pathType": "ASC_RAIL",
+      "direction": "VERTICAL",
+      "position": 175.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "ASC_RAIL",
+      "direction": "VERTICAL",
+      "position": 425.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    },
+    {
+      "pathType": "ASC_RAIL",
+      "direction": "VERTICAL",
+      "position": 675.0,
+      "startPoint": 200.0,
+      "endPoint": 550.0,
+      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+    }
+  ]
+}

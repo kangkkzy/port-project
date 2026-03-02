@@ -66,7 +66,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             //  验证目标点是否在有效路径上
             double targetX = req.getTargetPoint().getX();
             double targetY = req.getTargetPoint().getY();
-            String deviceType = device.getType();
+            String deviceType = device.getType().name();
 
             if (!mapDataService.isPositionOnPath(deviceType, targetX, targetY)) {
                 throw new BusinessException(String.format(

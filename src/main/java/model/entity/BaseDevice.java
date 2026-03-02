@@ -44,6 +44,9 @@ public abstract class BaseDevice {
     private Point lastStartPos;       // 上次出发点
     private long lastMoveStartTime;   // 上次出发时间
 
+    // 剩余目标点列表（用于分段移动，经过每个节点）
+    private List<Point> remainingMoveTargets = new ArrayList<>();
+
     @SuppressWarnings("unused")
     public BaseDevice(String id, DeviceTypeEnum type) {
         this.id = id;

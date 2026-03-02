@@ -9,6 +9,10 @@
           {{ simStore.isPlaying ? '暂停播放' : '自动播放' }}
         </el-button>
         <el-button type="danger" @click="handleReset">重置系统</el-button>
+        <el-divider direction="vertical" />
+        <el-button type="info" @click="handleTestTruckDelivery">测试: 集卡配送流程</el-button>
+        <el-button type="info" @click="handleTestQcOperation">测试: 桥吊作业流程</el-button>
+        <el-button type="info" @click="handleTestAscOperation">测试: 龙门吊作业流程</el-button>
       </div>
       <div class="time-display">
         当前仿真时钟: <strong>{{ simStore.simTime }}</strong> ms
@@ -225,7 +229,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useSimStore } from '../stores/simStore'
-import { loadScenario, moveTruck, moveCrane, operateCrane, controlFence, chargeTruck } from '../api/simulation'
+import { loadScenario, moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcOperation, testAscOperation } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
@@ -494,6 +498,33 @@ const isValidTruckPosition = (x: number, y: number): boolean => {
   });
 };
 
+// 计算集卡道路网的边界，用于将点击点限制在道路范围内
+const getTruckRoadBounds = () => {
+  const truckPaths = getPathsByType('TRUCK_ROAD');
+  // 默认边界，与示意图一致
+  let minX = 50, maxX = 750, minY = 200, maxY = 550;
+
+  if (truckPaths.length === 0) {
+    return { minX, maxX, minY, maxY };
+  }
+
+  truckPaths.forEach(p => {
+    if (p.direction === 'HORIZONTAL') {
+      minX = Math.min(minX, p.startPoint);
+      maxX = Math.max(maxX, p.endPoint);
+      minY = Math.min(minY, p.position);
+      maxY = Math.max(maxY, p.position);
+    } else if (p.direction === 'VERTICAL') {
+      minX = Math.min(minX, p.position);
+      maxX = Math.max(maxX, p.position);
+      minY = Math.min(minY, p.startPoint);
+      maxY = Math.max(maxY, p.endPoint);
+    }
+  });
+
+  return { minX, maxX, minY, maxY };
+};
+
 // 验证设备移动目标是否在有效路径上
 const validateMoveTarget = (deviceType: string, x: number, y: number): string | null => {
   if (deviceType === 'QC' || deviceType === 'CRANE_QC') {
@@ -594,14 +625,18 @@ const handleStageClick = async (e: any) => {
       const nearestH = hRoads.reduce((prev, curr) => Math.abs(curr - pos.y) < Math.abs(prev - pos.y) ? curr : prev);
       const nearestV = vRoads.reduce((prev, curr) => Math.abs(curr - pos.x) < Math.abs(prev - pos.x) ? curr : prev);
 
+      const { minX, maxX, minY, maxY } = getTruckRoadBounds();
+
       let targetX = pos.x;
       let targetY = pos.y;
       if (Math.abs(nearestH - pos.y) < Math.abs(nearestV - pos.x)) {
+        // 更接近水平车道：Y 吸附到最近的水平道路，X 保持用户点击位置（并限制在道路范围内）
         targetY = nearestH;
-        targetX = nearestV; // 也要对齐到垂直道路
+        targetX = Math.max(minX, Math.min(maxX, pos.x));
       } else {
+        // 更接近垂直车道：X 吸附到最近的垂直道路，Y 保持用户点击位置（并限制在道路范围内）
         targetX = nearestV;
-        targetY = nearestH; // 也要对齐到水平道路
+        targetY = Math.max(minY, Math.min(maxY, pos.y));
       }
 
       // 验证目标位置
@@ -622,6 +657,53 @@ const handleStageClick = async (e: any) => {
 const handleStep = () => { simStore.doStepNext() }
 const handleTogglePlay = () => { simStore.togglePlay() }
 const handleReset = () => { simStore.doReset() }
+
+// 测试场景：集卡完整配送流程
+const handleTestTruckDelivery = async () => {
+  try {
+    // 先确保场景已加载
+    await handleLoadMockData()
+    // 触发后端集卡配送流程测试
+    const res = await testTruckDelivery()
+    if (res.code === 200) {
+      ElMessage.success(res.message || '集卡配送流程已启动')
+    } else {
+      ElMessage.warning(res.message || '启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '测试启动失败')
+  }
+}
+
+// 测试场景：桥吊作业流程
+const handleTestQcOperation = async () => {
+  try {
+    await handleLoadMockData()
+    const res = await testQcOperation()
+    if (res.code === 200) {
+      ElMessage.success(res.message || '桥吊作业流程已启动')
+    } else {
+      ElMessage.warning(res.message || '启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '测试启动失败')
+  }
+}
+
+// 测试场景：龙门吊作业流程
+const handleTestAscOperation = async () => {
+  try {
+    await handleLoadMockData()
+    const res = await testAscOperation()
+    if (res.code === 200) {
+      ElMessage.success(res.message || '龙门吊作业流程已启动')
+    } else {
+      ElMessage.warning(res.message || '启动失败')
+    }
+  } catch (err: any) {
+    ElMessage.error(err.message || '测试启动失败')
+  }
+}
 
 const handleLoadMockData = async () => {
   const mockData = {

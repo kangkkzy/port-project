@@ -124,4 +124,91 @@ public class MapDataServiceImpl implements MapDataService {
 
         return false;
     }
+
+    @Override
+    public List<Double> getKeyPointsBetween(String deviceType, double startX, double startY, double endX, double endY) {
+        // 设备类型映射
+        String targetPathType;
+        if ("QC".equalsIgnoreCase(deviceType) || "CRANE_QC".equalsIgnoreCase(deviceType)) {
+            targetPathType = "QC_RAIL";
+        } else if ("ASC".equalsIgnoreCase(deviceType) || "CRANE_ASC".equalsIgnoreCase(deviceType)) {
+            targetPathType = "ASC_RAIL";
+        } else if ("ELECTRIC_TRUCK".equalsIgnoreCase(deviceType) || "INTERNAL_TRUCK".equalsIgnoreCase(deviceType) || "TRUCK".equalsIgnoreCase(deviceType)) {
+            targetPathType = "TRUCK_ROAD";
+        } else {
+            return new ArrayList<>();
+        }
+
+        // 找到起点和终点所在的路径
+        MapPathDto startPath = null;
+        MapPathDto endPath = null;
+
+        for (MapPathDto path : pathList) {
+            if (!path.getPathType().equals(targetPathType)) {
+                continue;
+            }
+
+            // 检查起点是否在路径上
+            if ("HORIZONTAL".equals(path.getDirection())) {
+                if (Math.abs(startY - path.getPosition()) < 5 && startX >= path.getStartPoint() && startX <= path.getEndPoint()) {
+                    startPath = path;
+                }
+                if (Math.abs(endY - path.getPosition()) < 5 && endX >= path.getStartPoint() && endX <= path.getEndPoint()) {
+                    endPath = path;
+                }
+            } else if ("VERTICAL".equals(path.getDirection())) {
+                if (Math.abs(startX - path.getPosition()) < 5 && startY >= path.getStartPoint() && startY <= path.getEndPoint()) {
+                    startPath = path;
+                }
+                if (Math.abs(endX - path.getPosition()) < 5 && endY >= path.getStartPoint() && endY <= path.getEndPoint()) {
+                    endPath = path;
+                }
+            }
+        }
+
+        // 如果起点和终点在同一条路径上，提取该路径的关键点
+        if (startPath != null && startPath == endPath && startPath.getKeyPoints() != null) {
+            List<Double> keyPoints = new ArrayList<>();
+            List<Double> allKeyPoints = startPath.getKeyPoints();
+
+            // 确定移动方向
+            boolean movingForward;
+            boolean isHorizontal = "HORIZONTAL".equals(startPath.getDirection());
+            if (isHorizontal) {
+                movingForward = endX > startX;
+            } else {
+                movingForward = endY > startY;
+            }
+
+            // 筛选在起点和终点之间的关键点
+            for (Double keyPoint : allKeyPoints) {
+                if (isHorizontal) {
+                    if (movingForward) {
+                        if (keyPoint > startX && keyPoint <= endX) {
+                            keyPoints.add(keyPoint);
+                        }
+                    } else {
+                        if (keyPoint < startX && keyPoint >= endX) {
+                            keyPoints.add(keyPoint);
+                        }
+                    }
+                } else {
+                    if (movingForward) {
+                        if (keyPoint > startY && keyPoint <= endY) {
+                            keyPoints.add(keyPoint);
+                        }
+                    } else {
+                        if (keyPoint < startY && keyPoint >= endY) {
+                            keyPoints.add(keyPoint);
+                        }
+                    }
+                }
+            }
+
+            return keyPoints;
+        }
+
+        return new ArrayList<>();
+    }
+
 }

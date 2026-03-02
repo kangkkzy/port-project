@@ -45,4 +45,16 @@ public interface MapDataService {
      * @return 是否在有效路径上
      */
     boolean isPositionOnPath(String deviceType, double x, double y);
+
+    /**
+     * 获取两个位置之间的关键点列表（用于分段移动）
+     * @param deviceType 设备类型
+     * @param startX 起始X坐标
+     * @param startY 起始Y坐标
+     * @param endX 目标X坐标
+     * @param endY 目标Y坐标
+     * @return 关键点列表（包含起点和终点之间的所有中间节点坐标）
+     */
+    List<Double> getKeyPointsBetween(String deviceType, double startX, double startY, double endX, double endY);
+
 }

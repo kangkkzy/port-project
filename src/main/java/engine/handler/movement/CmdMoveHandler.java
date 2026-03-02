@@ -9,8 +9,12 @@ import engine.SimulationEngine;
 import engine.context.GlobalContext;
 import model.entity.BaseDevice;
 import model.entity.Point;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import service.algorithm.MapDataService;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,6 +22,13 @@ import java.util.Map;
  */
 @Component
 public class CmdMoveHandler implements SimEventHandler {
+
+    private final MapDataService mapDataService;
+
+    @Autowired
+    public CmdMoveHandler(MapDataService mapDataService) {
+        this.mapDataService = mapDataService;
+    }
 
     @Override
     public EventTypeEnum getType() {
@@ -42,9 +53,37 @@ public class CmdMoveHandler implements SimEventHandler {
         }
 
         Point target = (Point) payload.get("target");
-        device.setSpeed(speed);
-        device.setCurrentTargetPos(target);
+        double startX = device.getPosX();
+        double startY = device.getPosY();
+        double endX = target.getX();
+        double endY = target.getY();
 
+        // 获取路径上的关键点
+        String deviceType = device.getType().name();
+        List<Double> keyPoints = mapDataService.getKeyPointsBetween(deviceType, startX, startY, endX, endY);
+
+        // 将关键点转换为路径坐标点列表
+        List<Point> remainingTargets = new ArrayList<>();
+        boolean isHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
+
+        for (Double keyPoint : keyPoints) {
+            if (isHorizontal) {
+                remainingTargets.add(new Point(keyPoint, endY));
+            } else {
+                remainingTargets.add(new Point(endX, keyPoint));
+            }
+        }
+        // 添加最终目标
+        remainingTargets.add(target);
+
+        // 将剩余目标列表存入设备
+        device.setRemainingMoveTargets(remainingTargets);
+
+        // 设置第一段的速度和目标
+        device.setSpeed(speed);
+        device.setCurrentTargetPos(remainingTargets.get(0));
+
+        // 调度MOVE_START事件
         SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
         moveStart.addSubject("TRUCK", truckId);
     }

@@ -165,8 +165,9 @@ export const useSimStore = defineStore('simulation', {
         // 加载地图路径配置
         async loadMapPaths() {
             try {
-                const paths = await getMapPaths();
-                this.mapPaths = paths || [];
+                const res = await getMapPaths();
+                const paths = res?.data || [];
+                this.mapPaths = paths;
                 console.log('地图路径配置已加载:', this.mapPaths.length, '条');
             } catch (error) {
                 console.error('加载地图路径配置失败', error);

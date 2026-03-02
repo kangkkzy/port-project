@@ -61,3 +61,17 @@ export const getAllErrors = () => request.get('/errors/all');
 
 // 查询暂停的事件链
 export const getSuspendedChains = () => request.get('/errors/suspended-chains');
+
+// ================= 测试场景 =================
+// 注意：前缀 /sim 已在 request.ts 的 baseURL 中配置
+// 执行集卡完整业务流程测试
+export const testTruckDelivery = () => request.post('/test/truck-delivery');
+
+// 执行桥吊QC业务流程测试
+export const testQcOperation = () => request.post('/test/qc-operation');
+
+// 执行龙门吊ASC业务流程测试
+export const testAscOperation = () => request.post('/test/asc-operation');
+
+// 健康检查
+export const healthCheck = () => request.get('/health/ping');
