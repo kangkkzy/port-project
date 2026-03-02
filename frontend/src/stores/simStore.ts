@@ -1,15 +1,21 @@
 import { defineStore } from 'pinia';
 // 导入了 getEvents
-import { getSnapshot, stepNextEvent, resetSimulation, getEvents } from '../api/simulation';
+import { getSnapshot, stepNextEvent, resetSimulation, getEvents, getErrors, getAllErrors, getSuspendedChains } from '../api/simulation';
 
 export const useSimStore = defineStore('simulation', {
     state: () => ({
         simTime: 0,
         devices: [] as any[],
-        events: [] as any[],     // 存放事件日志的数组
-        lastEventSimTime: 0,     // 记录上次查到了哪个时间的日志
+        fences: [] as any[],
+        chargingStations: [] as any[],
+        workInstructions: [] as any[],
+        events: [] as any[],
+        errors: [] as any[],
+        lastEventSimTime: 0,
+        lastErrorSimTime: 0,
         isPlaying: false,
-        playInterval: null as any
+        playInterval: null as any,
+        selectedDevice: null as any,
     }),
 
     actions: {
@@ -19,9 +25,13 @@ export const useSimStore = defineStore('simulation', {
                 if (data) {
                     this.simTime = data.simTime;
                     this.devices = data.devices || [];
+                    this.fences = data.fences || [];
+                    this.chargingStations = data.chargingStations || [];
+                    this.workInstructions = data.workInstructions || [];
                 }
                 // 每次拿完快照，顺便去拿一下最新的日志
                 await this.fetchLogs();
+                await this.fetchErrors();
             } catch (error) {
                 console.error("更新快照数据失败", error);
             }
@@ -52,6 +62,42 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
+        // 拉取错误日志
+        async fetchErrors() {
+            try {
+                const errors: any = await getErrors(this.lastErrorSimTime);
+                if (errors && errors.length > 0) {
+                    this.errors.push(...errors);
+                    const maxTime = Math.max(...errors.map((e: any) => e.simTime));
+                    this.lastErrorSimTime = maxTime;
+                }
+            } catch (e) {
+                console.error("获取错误日志失败", e);
+            }
+        },
+
+        // 获取所有错误日志
+        async fetchAllErrors() {
+            try {
+                const errors: any = await getAllErrors();
+                this.errors = errors || [];
+                return errors;
+            } catch (e) {
+                console.error("获取所有错误日志失败", e);
+                return [];
+            }
+        },
+
+        // 获取暂停的事件链
+        async fetchSuspendedChains() {
+            try {
+                return await getSuspendedChains();
+            } catch (e) {
+                console.error("获取暂停事件链失败", e);
+                return null;
+            }
+        },
+
         async doStepNext() {
             try {
                 await stepNextEvent();
@@ -65,9 +111,11 @@ export const useSimStore = defineStore('simulation', {
             try {
                 await resetSimulation();
                 this.stopAutoPlay();
-                // 【新增】重置时清空日志
+                // 重置时清空日志
                 this.events = [];
+                this.errors = [];
                 this.lastEventSimTime = 0;
+                this.lastErrorSimTime = 0;
                 await this.updateSnapshot();
             } catch (error) {
                 console.error("重置系统失败", error);
@@ -91,6 +139,16 @@ export const useSimStore = defineStore('simulation', {
                 clearInterval(this.playInterval);
                 this.playInterval = null;
             }
+        },
+
+        // 设置选中的设备
+        setSelectedDevice(device: any) {
+            this.selectedDevice = device;
+        },
+
+        // 清除选中的设备
+        clearSelectedDevice() {
+            this.selectedDevice = null;
         }
     }
 });

@@ -36,6 +36,10 @@
               <v-line :config="{ points: [300, 200, 300, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [550, 200, 550, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
               <v-line :config="{ points: [750, 200, 750, 550], stroke: '#ffb300', strokeWidth: 10, opacity: 0.5, name: 'bg' }" />
+
+              <!-- 围栏显示 -->
+              <v-circle v-for="fence in simStore.fences" :key="fence.nodeId"
+                        :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === 'OPEN' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
             </v-layer>
 
             <v-layer>
@@ -67,24 +71,137 @@
         </div>
       </div>
 
-      <div class="info-panel">
-        <h3>实时设备状态 (共 {{ simStore.devices.length }} 台)</h3>
-        <ul class="device-list">
-          <li v-for="dev in simStore.devices" :key="dev.id" @click="selectDevice(dev.id, dev.type)" :class="{ active: selectedDeviceId === dev.id }">
-            <span class="dev-id" :style="{ color: getDeviceColor(dev.type) }">{{ dev.id }}</span>
-            <span class="dev-state">[{{ dev.state }}]</span>
-            <span class="dev-pos">目标坐标: ({{ dev.posX.toFixed(0) }}, {{ dev.posY.toFixed(0) }})</span>
-          </li>
-        </ul>
+      <div class="right-section">
+        <!-- 设备列表 -->
+        <div class="info-panel">
+          <h3>实时设备状态 (共 {{ simStore.devices.length }} 台)</h3>
+          <ul class="device-list">
+            <li v-for="dev in simStore.devices" :key="dev.id" @click="selectDevice(dev.id, dev.type)" :class="{ active: selectedDeviceId === dev.id }">
+              <span class="dev-id" :style="{ color: getDeviceColor(dev.type) }">{{ dev.id }}</span>
+              <span class="dev-state">[{{ dev.state }}]</span>
+              <span class="dev-pos">坐标: ({{ dev.posX.toFixed(0) }}, {{ dev.posY.toFixed(0) }})</span>
+              <span v-if="dev.powerLevel" class="dev-power">电量: {{ dev.powerLevel }}%</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 选中设备控制面板 -->
+        <div class="control-panel" v-if="selectedDeviceId">
+          <h3>设备控制 - {{ selectedDeviceId }}</h3>
+          <div class="control-info">
+            <p><strong>类型:</strong> {{ selectedDeviceType }}</p>
+            <p><strong>状态:</strong> {{ selectedDeviceState }}</p>
+            <p v-if="selectedDevicePower"><strong>电量:</strong> {{ selectedDevicePower }}%</p>
+          </div>
+          <div class="control-buttons">
+            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK' || selectedDeviceType === 'INTERNAL_TRUCK'" type="primary" size="small" @click="showTruckMoveDialog = true">移动</el-button>
+            <el-button v-if="selectedDeviceType === 'QC'" type="primary" size="small" @click="showCraneMoveDialog = true">移动</el-button>
+            <el-button v-if="selectedDeviceType === 'ASC'" type="primary" size="small" @click="showCraneMoveDialog = true">移动</el-button>
+            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK'" type="warning" size="small" @click="handleCharge">充电</el-button>
+            <el-button v-if="selectedDeviceType === 'QC' || selectedDeviceType === 'ASC'" type="success" size="small" @click="showCraneOpDialog = true">操作</el-button>
+          </div>
+        </div>
+
+        <!-- 围栏状态 -->
+        <div class="fence-panel" v-if="simStore.fences.length > 0">
+          <h3>围栏状态 (共 {{ simStore.fences.length }} 个)</h3>
+          <ul class="fence-list">
+            <li v-for="fence in simStore.fences" :key="fence.nodeId">
+              <span class="fence-id">{{ fence.nodeId }}</span>
+              <span :class="['fence-status', fence.status === 'OPEN' ? 'open' : 'closed']">{{ fence.status }}</span>
+              <el-button size="small" @click="toggleFence(fence)">{{ fence.status === 'OPEN' ? '关闭' : '开启' }}</el-button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 作业指令 -->
+        <div class="wi-panel" v-if="simStore.workInstructions.length > 0">
+          <h3>作业指令 (共 {{ simStore.workInstructions.length }} 条)</h3>
+          <ul class="wi-list">
+            <li v-for="wi in simStore.workInstructions" :key="wi.wiRefNo">
+              <span class="wi-ref">{{ wi.wiRefNo }}</span>
+              <span class="wi-move">{{ wi.moveKind }}</span>
+              <span class="wi-status">{{ wi.wiStatus }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- 错误日志 -->
+        <div class="error-panel" v-if="simStore.errors.length > 0">
+          <h3>错误日志 (共 {{ simStore.errors.length }} 条)</h3>
+          <ul class="error-list">
+            <li v-for="(err, idx) in simStore.errors.slice(-10)" :key="idx">
+              <span class="err-time">[{{ err.simTime }}ms]</span>
+              <span class="err-msg">{{ err.message || err.error }}</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
+
+    <!-- 集卡移动对话框 -->
+    <el-dialog v-model="showTruckMoveDialog" title="集卡移动控制" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="目标X">
+          <el-input-number v-model="truckMoveTarget.x" :min="0" :max="800" />
+        </el-form-item>
+        <el-form-item label="目标Y">
+          <el-input-number v-model="truckMoveTarget.y" :min="0" :max="600" />
+        </el-form-item>
+        <el-form-item label="速度">
+          <el-input-number v-model="truckMoveTarget.speed" :min="1" :max="50" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTruckMoveDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleTruckMove">确认移动</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 桥吊/龙门吊移动对话框 -->
+    <el-dialog v-model="showCraneMoveDialog" title="起重机移动控制" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="移动类型">
+          <el-select v-model="craneMoveType">
+            <el-option label="水平移动" value="MOVE_HORIZONTAL" />
+            <el-option label="垂直移动" value="MOVE_VERTICAL" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="距离">
+          <el-input-number v-model="craneMoveDistance" :min="-500" :max="500" />
+        </el-form-item>
+        <el-form-item label="速度">
+          <el-input-number v-model="craneMoveSpeed" :min="1" :max="50" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCraneMoveDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleCraneMove">确认移动</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 起重机操作对话框 -->
+    <el-dialog v-model="showCraneOpDialog" title="起重机操作控制" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="操作类型">
+          <el-select v-model="craneOpType">
+            <el-option label="起吊(FETCH)" value="FETCH" />
+            <el-option label="放箱(PUT)" value="PUT" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCraneOpDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleCraneOperate">确认操作</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useSimStore } from '../stores/simStore'
-import { loadScenario, moveTruck, moveCrane } from '../api/simulation'
+import { loadScenario, moveTruck, moveCrane, operateCrane, controlFence, chargeTruck } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
@@ -94,7 +211,25 @@ let animFrameId: number;
 const stageConfig = ref({ width: 800, height: 600 })
 const selectedDeviceId = ref('')
 const selectedDeviceType = ref('')
+const selectedDeviceState = ref('')
+const selectedDevicePower = ref<number | null>(null)
 const logContainer = ref<HTMLElement | null>(null)
+
+// 对话框控制
+const showTruckMoveDialog = ref(false)
+const showCraneMoveDialog = ref(false)
+const showCraneOpDialog = ref(false)
+
+// 集卡移动参数
+const truckMoveTarget = ref({ x: 0, y: 0, speed: 10 })
+
+// 起重机移动参数
+const craneMoveType = ref('MOVE_HORIZONTAL')
+const craneMoveDistance = ref(0)
+const craneMoveSpeed = ref(10)
+
+// 起重机操作参数
+const craneOpType = ref('FETCH')
 
 // 专门用于动画渲染的设备数组
 const displayDevices = ref<Record<string, any>>({})
@@ -163,6 +298,88 @@ const formatSubjects = (subjects: any) => {
 const selectDevice = (id: string, type: string) => {
   selectedDeviceId.value = id
   selectedDeviceType.value = type
+  const device = simStore.devices.find(d => d.id === id)
+  if (device) {
+    selectedDeviceState.value = device.state
+    selectedDevicePower.value = device.powerLevel || null
+  }
+  simStore.setSelectedDevice(device)
+}
+
+// 集卡移动
+const handleTruckMove = async () => {
+  try {
+    await moveTruck({
+      truckId: selectedDeviceId.value,
+      targetPoint: { x: truckMoveTarget.value.x, y: truckMoveTarget.value.y },
+      speed: truckMoveTarget.value.speed
+    })
+    ElMessage.success('移动指令已下发')
+    showTruckMoveDialog.value = false
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '移动指令失败')
+  }
+}
+
+// 起重机移动
+const handleCraneMove = async () => {
+  try {
+    await moveCrane({
+      craneId: selectedDeviceId.value,
+      moveType: craneMoveType.value,
+      distance: craneMoveDistance.value,
+      speed: craneMoveSpeed.value
+    })
+    ElMessage.success('移动指令已下发')
+    showCraneMoveDialog.value = false
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '移动指令失败')
+  }
+}
+
+// 起重机操作
+const handleCraneOperate = async () => {
+  try {
+    await operateCrane({
+      craneId: selectedDeviceId.value,
+      operation: craneOpType.value
+    })
+    ElMessage.success('操作指令已下发')
+    showCraneOpDialog.value = false
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '操作指令失败')
+  }
+}
+
+// 集卡充电
+const handleCharge = async () => {
+  try {
+    await chargeTruck({
+      truckId: selectedDeviceId.value
+    })
+    ElMessage.success('充电指令已下发')
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '充电指令失败')
+  }
+}
+
+// 围栏控制
+const toggleFence = async (fence: any) => {
+  try {
+    const newStatus = fence.status === 'OPEN' ? 'CLOSED' : 'OPEN'
+    await controlFence({
+      nodeId: fence.nodeId,
+      status: newStatus
+    })
+    ElMessage.success(`围栏已${newStatus === 'OPEN' ? '开启' : '关闭'}`)
+    await simStore.updateSnapshot()
+  } catch (err: any) {
+    ElMessage.error(err.message || '围栏控制失败')
+  }
 }
 
 // 约束寻路算法
@@ -231,14 +448,52 @@ const handleLoadMockData = async () => {
 .log-type { color: #569cd6; font-weight: bold; margin-right: 12px; display: inline-block; min-width: 120px; }
 .log-subject { color: #ce9178; }
 
-.info-panel { width: 350px; background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 20px; display: flex; flex-direction: column; }
-.device-list { list-style: none; padding: 0; overflow-y: auto; flex: 1; }
-.device-list li { padding: 12px; border-bottom: 1px solid #ebeef5; display: flex; flex-direction: column; gap: 5px; cursor: pointer; transition: background 0.2s; border-radius: 4px; }
+.right-section { width: 380px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
+
+.info-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 250px; display: flex; flex-direction: column; }
+.info-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
+.device-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+.device-list li { padding: 10px; border-bottom: 1px solid #ebeef5; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: background 0.2s; border-radius: 4px; font-size: 13px; }
 .device-list li:hover { background: #f5f7fa; }
 .device-list li.active { background: #ecf5ff; border: 1px solid #c6e2ff; }
-.dev-id { font-weight: bold; font-size: 15px;}
-.dev-state { color: #E6A23C; font-size: 14px; }
-.dev-pos { color: #909399; font-size: 13px; }
+.dev-id { font-weight: bold; font-size: 14px;}
+.dev-state { color: #E6A23C; font-size: 12px; }
+.dev-pos { color: #909399; font-size: 11px; }
+.dev-power { color: #67c23a; font-size: 11px; }
+
+/* 控制面板 */
+.control-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; }
+.control-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
+.control-info { margin-bottom: 10px; font-size: 13px; color: #606266; }
+.control-info p { margin: 5px 0; }
+.control-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 围栏面板 */
+.fence-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; }
+.fence-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
+.fence-list { list-style: none; padding: 0; margin: 0; }
+.fence-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ebeef5; font-size: 13px; }
+.fence-id { font-weight: bold; }
+.fence-status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.fence-status.open { background: #e7f7e7; color: #67c23a; }
+.fence-status.closed { background: #fdecea; color: #f56c6c; }
+
+/* 作业指令面板 */
+.wi-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 200px; display: flex; flex-direction: column; }
+.wi-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
+.wi-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+.wi-list li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ebeef5; font-size: 12px; }
+.wi-ref { font-weight: bold; color: #409EFF; }
+.wi-move { color: #E6A23C; }
+.wi-status { color: #67c23a; }
+
+/* 错误日志面板 */
+.error-panel { background: #fef0f0; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 150px; display: flex; flex-direction: column; border: 1px solid #fbc4c4; }
+.error-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #f56c6c; }
+.error-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+.error-list li { padding: 6px 0; font-size: 12px; border-bottom: 1px solid #fbc4c4; }
+.err-time { color: #909399; margin-right: 8px; }
+.err-msg { color: #f56c6c; }
 
 /* 自定义滚动条 */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

@@ -22,9 +22,31 @@ export const loadScenario = (data: any) => request.post('/admin/load', data);
 // 查询事件流水
 export const getEvents = (sinceSimTime: number = 0) => request.get('/events', { params: { since: sinceSimTime } });
 
-// 查询错误/死循环日志
-export const getErrors = (sinceSimTime: number = 0) => request.get('/errors', { params: { since: sinceSimTime } });
+// ================= 设备控制 =================
 // 下发集卡移动指令
 export const moveTruck = (data: any) => request.post('/command/truck/move', data);
+
 // 下发桥吊/龙门吊移动指令
 export const moveCrane = (data: any) => request.post('/command/crane/move', data);
+
+// 桥吊操作（起吊/放箱）
+export const operateCrane = (data: any) => request.post('/command/crane/operate', data);
+
+// 围栏控制
+export const controlFence = (data: any) => request.post('/command/fence', data);
+
+// 集卡充电
+export const chargeTruck = (data: any) => request.post('/command/truck/charge', data);
+
+// 任务分配
+export const assignTask = (data: any) => request.post('/command/assign', data);
+
+// ================= 错误日志 =================
+// 查询错误日志
+export const getErrors = (sinceSimTime: number = 0) => request.get('/errors', { params: { since: sinceSimTime } });
+
+// 查询所有错误日志
+export const getAllErrors = () => request.get('/errors/all');
+
+// 查询暂停的事件链
+export const getSuspendedChains = () => request.get('/errors/suspended-chains');
