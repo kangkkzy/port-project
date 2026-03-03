@@ -1,6 +1,7 @@
 package service.algorithm;
 
 import model.dto.config.MapPathDto;
+import model.dto.config.TransferZoneDto;
 import model.entity.Point;
 
 import java.util.List;
@@ -37,6 +38,12 @@ public interface MapDataService {
      * @return 路径配置列表
      */
     List<MapPathDto> getAllPaths();
+
+    /**
+     * 获取所有交接区域配置（用于前端显示和验证）
+     * @return 交接区域列表
+     */
+    List<TransferZoneDto> getAllTransferZones();
 
     /**
      * 验证设备类型在指定坐标是否在有效路径上

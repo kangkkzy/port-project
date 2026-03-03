@@ -60,6 +60,35 @@
                 }"
               />
 
+              <!-- 交接区域显示 -->
+              <v-rect
+                  v-for="zone in simStore.transferZones"
+                  :key="'zone-'+zone.zoneId"
+                  :config="{
+                  x: zone.xRange[0],
+                  y: zone.yRange[0],
+                  width: zone.xRange[1] - zone.xRange[0],
+                  height: zone.yRange[1] - zone.yRange[0],
+                  fill: zone.zoneId.startsWith('QC') ? 'rgba(255, 152, 0, 0.2)' : 'rgba(76, 175, 80, 0.2)',
+                  stroke: zone.zoneId.startsWith('QC') ? '#ff9800' : '#4caf50',
+                  strokeWidth: 2,
+                  dash: [5, 5],
+                  name: 'bg'
+                }"
+              />
+              <v-text
+                  v-for="zone in simStore.transferZones"
+                  :key="'zone-label-'+zone.zoneId"
+                  :config="{
+                  x: zone.xRange[0] + 5,
+                  y: zone.yRange[0] + 5,
+                  text: zone.name,
+                  fontSize: 10,
+                  fill: zone.zoneId.startsWith('QC') ? '#e65100' : '#1b5e20',
+                  name: 'bg'
+                }"
+              />
+
               <v-rect v-for="x in [100, 350, 600]" :key="'yard-'+x" :config="{ x: x, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c', strokeWidth: 2, name: 'bg' }" />
 
               <v-circle v-for="fence in simStore.fences" :key="fence.nodeId" :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
@@ -232,7 +261,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
-import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading, testYardShift, testRecv, testDirectIn, testDirectOut } from '../api/simulation'
+import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading, testYardShift, testRecv, testDirectIn, testDirectOut, testQcHorizontalVertical, testAscHorizontalVertical } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
@@ -294,6 +323,7 @@ const animateLoop = () => {
 onMounted(() => {
   simStore.updateSnapshot()
   simStore.loadMapPaths()
+  simStore.loadTransferZones()
   simStore.startSnapshotPolling(500)
   animateLoop()
 })
@@ -412,6 +442,8 @@ const handleTestScenario = async (command: string) => {
       case 'recv': res = await testRecv(); break;
       case 'direct-in': res = await testDirectIn(); break;
       case 'direct-out': res = await testDirectOut(); break;
+      case 'qc-hv': res = await testQcHorizontalVertical(); break;
+      case 'asc-hv': res = await testAscHorizontalVertical(); break;
       default: ElMessage.warning(`命令 ${command} 暂未实现`); return;
     }
 
@@ -431,6 +463,59 @@ const handleTestScenario = async (command: string) => {
 
 const getPathsByType = (pathType: string) => simStore.mapPaths.filter(p => p.pathType === pathType);
 
+// 将任意点击点投影到最近的集卡道路上，确保集卡只能在路网上运行
+const projectToTruckRoad = (x: number, y: number) => {
+  const roads = getPathsByType('TRUCK_ROAD');
+  let bestPoint: { x: number; y: number } | null = null;
+  let minDist = Infinity;
+
+  roads.forEach((path: any) => {
+    if (path.direction === 'HORIZONTAL') {
+      if (x < path.startPoint || x > path.endPoint) return;
+      const py = path.position;
+      const dist = Math.abs(y - py);
+      if (dist < minDist) {
+        minDist = dist;
+        bestPoint = { x, y: py };
+      }
+    } else if (path.direction === 'VERTICAL') {
+      if (y < path.startPoint || y > path.endPoint) return;
+      const px = path.position;
+      const dist = Math.abs(x - px);
+      if (dist < minDist) {
+        minDist = dist;
+        bestPoint = { x: px, y };
+      }
+    }
+  });
+
+  // 距离道路太远则认为点击无效，避免产生“穿越堆场”的指令
+  if (!bestPoint || minDist > 40) {
+    return null;
+  }
+  return bestPoint;
+};
+
+const getQcRail = () => {
+  const rails = getPathsByType('QC_RAIL');
+  return rails.length > 0 ? rails[0] : null;
+};
+
+const getAscRailForDevice = (deviceX: number) => {
+  const rails = getPathsByType('ASC_RAIL');
+  if (rails.length === 0) return null;
+  let bestRail: any = rails[0];
+  let minDx = Math.abs(deviceX - bestRail.position);
+  rails.forEach((r: any) => {
+    const dx = Math.abs(deviceX - r.position);
+    if (dx < minDx) {
+      minDx = dx;
+      bestRail = r;
+    }
+  });
+  return bestRail;
+};
+
 const handleStageClick = async (e: any) => {
   if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
   const pos = e.target.getStage().getPointerPosition();
@@ -439,19 +524,73 @@ const handleStageClick = async (e: any) => {
 
   try {
     if (selectedDeviceType.value === 'QC') {
-      const targetX = Math.max(0, Math.min(800, pos.x));
+      // QC 只能沿岸边轨道水平移动
+      const rail = getQcRail();
+      if (!rail) {
+        ElMessage.error('当前地图未配置QC轨道');
+        return;
+      }
+      const targetX = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.x));
       const distance = targetX - device.posX;
-      if (Math.abs(distance) > 1) await moveCrane({ craneId: device.id, moveType: "MOVE_HORIZONTAL", distance, speed: 10.0 });
+      if (Math.abs(distance) > 1) {
+        await moveCrane({
+          craneId: device.id,
+          moveType: 'MOVE_HORIZONTAL',
+          distance,
+          speed: 10.0
+        });
+      }
     } else if (selectedDeviceType.value === 'ASC') {
-      const targetY = Math.max(200, Math.min(550, pos.y));
-      const distance = targetY - device.posY;
-      if (Math.abs(distance) > 1) await moveCrane({ craneId: device.id, moveType: "MOVE_VERTICAL", distance, speed: 10.0 });
+      // ASC 既可以沿纵向轨道移动（龙门），也可以水平跨越堆场和集卡车道
+      const rail = getAscRailForDevice(device.posX);
+      if (!rail) {
+        ElMessage.error('当前地图未配置ASC轨道');
+        return;
+      }
+      const dx = pos.x - device.posX;
+      const dy = pos.y - device.posY;
+
+      // 根据用户点击方向，自动判断本次是水平还是垂直移动
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        // 水平移动：保持Y不变，只改变X
+        const distance = dx;
+        if (Math.abs(distance) > 1) {
+          await moveCrane({
+            craneId: device.id,
+            moveType: 'MOVE_HORIZONTAL',
+            distance,
+            speed: 10.0
+          });
+        }
+      } else {
+        // 垂直移动：投影到最近的ASC竖向轨道上，保持X在轨道位置
+        const targetY = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.y));
+        const distance = targetY - device.posY;
+        if (Math.abs(distance) > 1) {
+          await moveCrane({
+            craneId: device.id,
+            moveType: 'MOVE_VERTICAL',
+            distance,
+            speed: 10.0
+          });
+        }
+      }
     } else {
-      await moveTruck({ truckId: device.id, targetPoint: { x: pos.x, y: pos.y }, speed: 10.0 });
+      // 集卡：点击位置先投影到最近的道路，再下发移动指令
+      const projected = projectToTruckRoad(pos.x, pos.y);
+      if (!projected) {
+        ElMessage.warning('请点击靠近道路的位置，集卡只能在路网上运行');
+        return;
+      }
+      await moveTruck({
+        truckId: device.id,
+        targetPoint: { x: projected.x, y: projected.y },
+        speed: 10.0
+      });
     }
-    await simStore.updateSnapshot()
+    await simStore.updateSnapshot();
   } catch (err: any) {
-    ElMessage.error(err.message || '移动失败')
+    ElMessage.error(err.message || '移动失败');
   }
 }
 </script>

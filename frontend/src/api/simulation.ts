@@ -6,6 +6,7 @@ export const getSnapshot = () => request.get('/state/snapshot');
 // ================= 地图配置 =================
 export const getMapPaths = () => request.get('/map/paths');
 export const getMapPathsMap = () => request.get('/map/paths/map');
+export const getTransferZones = () => request.get('/map/transfer-zones');
 export const validatePosition = (deviceType: string, x: number, y: number) =>
     request.get('/map/validate', { params: { deviceType, x, y } });
 
@@ -44,6 +45,10 @@ export const testYardShift = () => request.post('/test/yard-shift');        // Y
 export const testRecv = () => request.post('/test/recv');                   // RECV 收箱
 export const testDirectIn = () => request.post('/test/direct-in');          // DIRECT_IN 直进
 export const testDirectOut = () => request.post('/test/direct-out');        // DIRECT_OUT 直提
+
+// QC/ASC 双向移动测试
+export const testQcHorizontalVertical = () => request.post('/test/qc-horizontal-vertical');   // QC 水平+垂直
+export const testAscHorizontalVertical = () => request.post('/test/asc-horizontal-vertical'); // ASC 水平+垂直
 
 // ================= 健康检查 =================
 export const healthCheck = () => request.get('/health/ping');

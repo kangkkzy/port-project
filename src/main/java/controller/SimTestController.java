@@ -691,4 +691,83 @@ public class SimTestController {
 
         return Result.success("已调度 DIRECT_OUT 直提测试");
     }
+
+    // ==================== QC/ASC 双向移动测试 ====================
+
+    /**
+     * QC 水平+垂直双向移动测试
+     * 演示 QC 沿轨道水平移动，然后垂直移动到集卡道路进行交接
+     */
+    @PostMapping("/qc-horizontal-vertical")
+    public Result testQcHorizontalVertical() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 集卡在 QC 交接区等待 (X=300)
+        ctx.getTruckMap().get("TRUCK_01").setPosX(300.0);
+        ctx.getTruckMap().get("TRUCK_01").setPosY(truckRoadY);
+
+        // QC 初始在 X=100
+        ctx.getQcMap().get("QC_01").setPosX(100.0);
+        ctx.getQcMap().get("QC_01").setPosY(qcRailY);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        // === 阶段1: QC 水平移动到交接区上方 (X=300) ===
+        timeline.moveCrane("QC_01", "MOVE_HORIZONTAL", 200.0, qcSpeed);
+
+        // === 阶段2: QC 垂直移动下降到集卡道路 (Y: 140 -> 200) ===
+        // QC 从轨道位置 Y=140 垂直向下移动 60 米到集卡道路 Y=200 进行交接
+        timeline.moveCrane("QC_01", "MOVE_VERTICAL", 60.0, qcSpeed);
+
+        // === 阶段3: QC 垂直上升回到轨道 (Y: 200 -> 140) ===
+        timeline.moveCrane("QC_01", "MOVE_VERTICAL", -60.0, qcSpeed);
+
+        // === 阶段4: QC 水平移动到新位置 (X=500) ===
+        timeline.moveCrane("QC_01", "MOVE_HORIZONTAL", 200.0, qcSpeed);
+
+        return Result.success("已调度 QC 水平+垂直双向移动测试");
+    }
+
+    /**
+     * ASC 水平+垂直双向移动测试
+     * 演示 ASC 沿轨道垂直移动，然后水平移动到集卡道路进行交接
+     */
+    @PostMapping("/asc-horizontal-vertical")
+    public Result testAscHorizontalVertical() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 集卡在 ASC 交接区等待 (X=175 - 第一个ASC轨道)
+        ctx.getTruckMap().get("TRUCK_01").setPosX(175.0);
+        ctx.getTruckMap().get("TRUCK_01").setPosY(truckRoadY);
+
+        // ASC 初始在 X=175, Y=300 (堆场内部)
+        ctx.getAscMap().get("ASC_01").setPosX(ascRailX1);
+        ctx.getAscMap().get("ASC_01").setPosY(300.0);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        // === 阶段1: ASC 垂直移动到交接位 (Y: 300 -> 200) ===
+        // ASC 从堆场内部垂直向上移动到集卡道路 Y=200 进行交接
+        timeline.moveCrane("ASC_01", "MOVE_VERTICAL", -100.0, ascSpeed);
+
+        // === 阶段2: ASC 水平移动到相邻轨道 (X: 175 -> 425) ===
+        // ASC 水平跨越到第二个轨道
+        timeline.moveCrane("ASC_01", "MOVE_HORIZONTAL", 250.0, ascSpeed);
+
+        // === 阶段3: ASC 垂直移动到新轨道的交接位 (Y: 200 -> 250) ===
+        timeline.moveCrane("ASC_01", "MOVE_VERTICAL", 50.0, ascSpeed);
+
+        // === 阶段4: ASC 水平移动返回原轨道 (X: 425 -> 175) ===
+        timeline.moveCrane("ASC_01", "MOVE_HORIZONTAL", -250.0, ascSpeed);
+
+        return Result.success("已调度 ASC 水平+垂直双向移动测试");
+    }
 }

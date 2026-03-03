@@ -2,6 +2,7 @@ package controller;
 
 import common.Result;
 import model.dto.config.MapPathDto;
+import model.dto.config.TransferZoneDto;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -45,6 +46,15 @@ public class MapConfigController {
                 .collect(Collectors.groupingBy(MapPathDto::getPathType));
 
         return Result.success("查询成功", pathsByType);
+    }
+
+    /**
+     * 获取所有交接区域配置（用于前端显示）
+     */
+    @GetMapping("/transfer-zones")
+    public Result getTransferZones() {
+        List<TransferZoneDto> zones = mapDataService.getAllTransferZones();
+        return Result.success("查询成功", zones);
     }
 
     /**

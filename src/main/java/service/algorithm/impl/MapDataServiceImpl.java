@@ -1,9 +1,11 @@
 package service.algorithm.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import common.exception.BusinessException;
 import model.dto.config.MapConfigDto;
 import model.dto.config.MapPathDto;
+import model.dto.config.TransferZoneDto;
 import model.entity.Point;
 import org.springframework.stereotype.Service;
 import service.algorithm.MapDataService;
@@ -23,10 +25,17 @@ public class MapDataServiceImpl implements MapDataService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    {
+        // 启用 JSON 注释支持
+        objectMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
+        objectMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
+    }
+
     // 内存缓存
     private final Map<String, Double> coordinateCache = new ConcurrentHashMap<>();
     private final Map<String, Double> parameterCache = new ConcurrentHashMap<>();
     private final List<MapPathDto> pathList = new ArrayList<>();
+    private final List<TransferZoneDto> transferZoneList = new ArrayList<>();
 
     @Override
     public void loadMapConfiguration(String jsonConfig) {
@@ -50,6 +59,13 @@ public class MapDataServiceImpl implements MapDataService {
                 pathList.clear();
                 pathList.addAll(config.getPaths());
                 System.out.println(">>> [MapData] 路径配置已加载: " + config.getPaths().size() + " 条");
+            }
+
+            // 加载交接区域配置
+            if (config.getTransferZones() != null) {
+                transferZoneList.clear();
+                transferZoneList.addAll(config.getTransferZones());
+                System.out.println(">>> [MapData] 交接区域配置已加载: " + config.getTransferZones().size() + " 个");
             }
 
         } catch (Exception e) {
@@ -89,6 +105,11 @@ public class MapDataServiceImpl implements MapDataService {
     @Override
     public List<MapPathDto> getAllPaths() {
         return new ArrayList<>(pathList);
+    }
+
+    @Override
+    public List<TransferZoneDto> getAllTransferZones() {
+        return new ArrayList<>(transferZoneList);
     }
 
     @Override

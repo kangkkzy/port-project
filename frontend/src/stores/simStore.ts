@@ -9,7 +9,8 @@ import {
     getErrors,
     getAllErrors,
     getSuspendedChains,
-    getMapPaths
+    getMapPaths,
+    getTransferZones
 } from '../api/simulation';
 
 export interface MapPath {
@@ -19,6 +20,16 @@ export interface MapPath {
     startPoint: number;
     endPoint: number;
     keyPoints?: number[];
+}
+
+export interface TransferZone {
+    zoneId: string;
+    name: string;
+    qcPosition?: number;
+    ascPosition?: number;
+    truckPositions?: number[];
+    xRange: number[];
+    yRange: number[];
 }
 
 export const useSimStore = defineStore('simulation', {
@@ -41,6 +52,7 @@ export const useSimStore = defineStore('simulation', {
         pollTimer: null as any,
         selectedDevice: null as any,
         mapPaths: [] as MapPath[],
+        transferZones: [] as TransferZone[],
     }),
 
     actions: {
@@ -213,6 +225,15 @@ export const useSimStore = defineStore('simulation', {
                 this.mapPaths = res.data || res || [];
             } catch (error) {
                 console.error("加载地图配置失败", error);
+            }
+        },
+
+        async loadTransferZones() {
+            try {
+                const res: any = await getTransferZones();
+                this.transferZones = res.data || res || [];
+            } catch (error) {
+                console.error("加载交接区域配置失败", error);
             }
         }
     }

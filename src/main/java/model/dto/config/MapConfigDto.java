@@ -7,6 +7,7 @@ public class MapConfigDto {
     private Map<String, Double> coordinates;
     private Map<String, Double> parameters;
     private List<MapPathDto> paths;
+    private List<TransferZoneDto> transferZones;
 
     public Map<String, Double> getCoordinates() { return coordinates; }
     public void setCoordinates(Map<String, Double> coordinates) { this.coordinates = coordinates; }
@@ -16,4 +17,7 @@ public class MapConfigDto {
 
     public List<MapPathDto> getPaths() { return paths; }
     public void setPaths(List<MapPathDto> paths) { this.paths = paths; }
+
+    public List<TransferZoneDto> getTransferZones() { return transferZones; }
+    public void setTransferZones(List<TransferZoneDto> transferZones) { this.transferZones = transferZones; }
 }

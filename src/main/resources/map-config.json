@@ -1,99 +1,157 @@
 {
   "coordinates": {
-    "BAY01": 20.0,
-    "BAY02": 40.0,
-    "BAY03": 60.0,
-    "BAY04": 80.0,
-    "YARD01": 100.0,
-    "GATE": 500.0
+    "BERTH_01": 150.0,
+    "BERTH_02": 400.0,
+    "BERTH_03": 650.0,
+    "YARD_A": 175.0,
+    "YARD_B": 425.0,
+    "YARD_C": 675.0,
+    "GATE_IN": 50.0,
+    "GATE_OUT": 750.0
   },
   "parameters": {
-    "minQcDistance": 15.0,
-    "truckSpeed": 5.0,
-    "qcSpeed": 0.8,
-    "ascSpeed": 0.5,
-    "maxSyncWaitMs": 900000.0
+    "minQcDistance": 30.0,
+    "truckSpeed": 10.0,
+    "qcSpeed": 1.5,
+    "ascSpeed": 2.0,
+    "maxSyncWaitMs": 90000.0,
+    "truckConsumeRate": 0.05,
+    "chargeRate": 5.0
   },
   "paths": [
     {
-      "pathType": "TRUCK_ROAD",
-      "direction": "HORIZONTAL",
-      "position": 200.0,
-      "startPoint": 0.0,
-      "endPoint": 800.0,
-      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "direction": "HORIZONTAL",
-      "position": 550.0,
-      "startPoint": 0.0,
-      "endPoint": 800.0,
-      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "direction": "VERTICAL",
-      "position": 50.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "direction": "VERTICAL",
-      "position": 300.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "direction": "VERTICAL",
-      "position": 550.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "direction": "VERTICAL",
-      "position": 750.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
-    },
-    {
       "pathType": "QC_RAIL",
       "direction": "HORIZONTAL",
-      "position": 140.0,
-      "startPoint": 0.0,
-      "endPoint": 800.0,
-      "keyPoints": [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+      "position": 120.0,
+      "startPoint": 20.0,
+      "endPoint": 780.0
     },
     {
       "pathType": "ASC_RAIL",
       "direction": "VERTICAL",
       "position": 175.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+      "startPoint": 260.0,
+      "endPoint": 520.0
     },
     {
       "pathType": "ASC_RAIL",
       "direction": "VERTICAL",
       "position": 425.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+      "startPoint": 260.0,
+      "endPoint": 520.0
     },
     {
       "pathType": "ASC_RAIL",
       "direction": "VERTICAL",
       "position": 675.0,
-      "startPoint": 200.0,
-      "endPoint": 550.0,
-      "keyPoints": [200.0, 275.0, 350.0, 425.0, 550.0]
+      "startPoint": 260.0,
+      "endPoint": 520.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 150.0,
+      "startPoint": 50.0,
+      "endPoint": 750.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 180.0,
+      "startPoint": 50.0,
+      "endPoint": 750.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 230.0,
+      "startPoint": 50.0,
+      "endPoint": 750.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "HORIZONTAL",
+      "position": 550.0,
+      "startPoint": 50.0,
+      "endPoint": 750.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 50.0,
+      "startPoint": 150.0,
+      "endPoint": 550.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 300.0,
+      "startPoint": 150.0,
+      "endPoint": 550.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 550.0,
+      "startPoint": 150.0,
+      "endPoint": 550.0
+    },
+    {
+      "pathType": "TRUCK_ROAD",
+      "direction": "VERTICAL",
+      "position": 750.0,
+      "startPoint": 150.0,
+      "endPoint": 550.0
+    }
+  ],
+  "transferZones": [
+    {
+      "zoneId": "QC_TRANSFER_BERTH_1",
+      "name": "泊位1_QC交接区",
+      "qcPosition": 120.0,
+      "truckPositions": [150.0, 180.0],
+      "xRange": [100.0, 250.0],
+      "yRange": [120.0, 190.0]
+    },
+    {
+      "zoneId": "QC_TRANSFER_BERTH_2",
+      "name": "泊位2_QC交接区",
+      "qcPosition": 120.0,
+      "truckPositions": [150.0, 180.0],
+      "xRange": [350.0, 500.0],
+      "yRange": [120.0, 190.0]
+    },
+    {
+      "zoneId": "QC_TRANSFER_BERTH_3",
+      "name": "泊位3_QC交接区",
+      "qcPosition": 120.0,
+      "truckPositions": [150.0, 180.0],
+      "xRange": [600.0, 750.0],
+      "yRange": [120.0, 190.0]
+    },
+    {
+      "zoneId": "ASC_TRANSFER_YARD_A",
+      "name": "堆场A_ASC交接区",
+      "ascPosition": 175.0,
+      "truckPositions": [230.0],
+      "xRange": [160.0, 190.0],
+      "yRange": [220.0, 270.0]
+    },
+    {
+      "zoneId": "ASC_TRANSFER_YARD_B",
+      "name": "堆场B_ASC交接区",
+      "ascPosition": 425.0,
+      "truckPositions": [230.0],
+      "xRange": [410.0, 440.0],
+      "yRange": [220.0, 270.0]
+    },
+    {
+      "zoneId": "ASC_TRANSFER_YARD_C",
+      "name": "堆场C_ASC交接区",
+      "ascPosition": 675.0,
+      "truckPositions": [230.0],
+      "xRange": [660.0, 690.0],
+      "yRange": [220.0, 270.0]
     }
   ]
 }
