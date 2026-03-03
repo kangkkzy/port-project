@@ -3,6 +3,7 @@
     <div class="toolbar">
       <h2>港口离散仿真系统</h2>
       <div class="buttons">
+        <el-button type="info" @click="handleInitScene">一键加载场景</el-button>
         <el-button type="primary" @click="handleStep">单步执行 (Next)</el-button>
         <el-button type="success" @click="handleTogglePlay">
           {{ simStore.isPlaying ? '暂停播放' : '自动播放' }}
@@ -309,7 +310,6 @@ import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruc
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
-let timer: any = null
 let animFrameId: number;
 
 const stageConfig = ref({ width: 800, height: 600 })
@@ -380,12 +380,13 @@ const animateLoop = () => {
 onMounted(() => {
   simStore.updateSnapshot()
   simStore.loadMapPaths()
-  timer = setInterval(() => { if (!simStore.isPlaying) simStore.updateSnapshot() }, 1000)
+  simStore.startSnapshotPolling(300)
   animateLoop()
 })
 
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
+  simStore.stopAutoPlay()
+  simStore.stopSnapshotPolling()
   if (animFrameId) cancelAnimationFrame(animFrameId)
 })
 
@@ -675,6 +676,11 @@ const handleStageClick = async (e: any) => {
   } catch (err: any) {
     ElMessage.error(err.message || '移动失败')
   }
+}
+
+const handleInitScene = async () => {
+  await simStore.initScene()
+  ElMessage.success('默认场景已加载')
 }
 
 const handleStep = () => { simStore.doStepNext() }

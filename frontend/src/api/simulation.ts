@@ -16,6 +16,7 @@ export const stepWithCommands = (data: any) => request.post('/command/stepWithCo
 
 // ================= 后台管理 =================
 export const resetSimulation = () => request.post('/admin/reset');
+export const initSimulation = () => request.post('/admin/init');
 export const loadScenario = (data: any) => request.post('/admin/load', data);
 
 // ================= 日志查询 =================

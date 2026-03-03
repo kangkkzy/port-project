@@ -4,6 +4,7 @@ import {
     stepNextEvent,
     tick,
     resetSimulation,
+    initSimulation,
     getEvents,
     getErrors,
     getAllErrors,
@@ -35,11 +36,30 @@ export const useSimStore = defineStore('simulation', {
         lastErrorSimTime: 0,
         isPlaying: false,
         playInterval: null as any,
+        isPolling: false,
+        pollIntervalMs: 300,
+        pollTimer: null as any,
         selectedDevice: null as any,
         mapPaths: [] as MapPath[],
     }),
 
     actions: {
+        async initScene() {
+            try {
+                await initSimulation();
+                this.stopAutoPlay();
+                this.stopSnapshotPolling();
+                this.events = [];
+                this.errors = [];
+                this.lastEventSimTime = 0;
+                this.lastErrorSimTime = 0;
+                await this.loadMapPaths();
+                await this.updateSnapshot();
+            } catch (error) {
+                console.error("初始化默认场景失败", error);
+            }
+        },
+
         async updateSnapshot() {
             try {
                 // 使用 any 绕过 AxiosResponse 泛型限制
@@ -58,6 +78,29 @@ export const useSimStore = defineStore('simulation', {
                 }
             } catch (error) {
                 console.error("获取快照失败", error);
+            }
+        },
+
+        startSnapshotPolling(intervalMs?: number) {
+            if (this.isPolling) return;
+            this.isPolling = true;
+            if (typeof intervalMs === 'number' && intervalMs > 0) {
+                this.pollIntervalMs = intervalMs;
+            }
+            this.pollTimer = setInterval(() => {
+                // 离散仿真：播放中由 tick 驱动刷新；此处仅在非播放状态下轮询同步
+                if (!this.isPlaying) {
+                    this.updateSnapshot();
+                    this.fetchLogs();
+                }
+            }, this.pollIntervalMs);
+        },
+
+        stopSnapshotPolling() {
+            this.isPolling = false;
+            if (this.pollTimer) {
+                clearInterval(this.pollTimer);
+                this.pollTimer = null;
             }
         },
 
@@ -91,10 +134,16 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
+        // 兼容旧调用名（组件里可能仍在使用）
+        async doStepNext() {
+            return this.doStep();
+        },
+
         async reset() {
             try {
                 await resetSimulation();
                 this.stopAutoPlay();
+                this.stopSnapshotPolling();
                 this.events = [];
                 this.errors = [];
                 this.lastEventSimTime = 0;
@@ -103,6 +152,11 @@ export const useSimStore = defineStore('simulation', {
             } catch (error) {
                 console.error("重置系统失败", error);
             }
+        },
+
+        // 兼容旧调用名（组件里可能仍在使用）
+        async doReset() {
+            return this.reset();
         },
 
         togglePlay() {

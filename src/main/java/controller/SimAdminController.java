@@ -1,6 +1,9 @@
 package controller;
 
 import common.Result;
+import common.consts.DeviceStateEnum;
+import common.consts.DeviceTypeEnum;
+import common.consts.FenceStateEnum;
 import engine.SimulationEngine;
 import lombok.Data;
 import engine.context.GlobalContext;
@@ -9,8 +12,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import service.algorithm.MapDataService;
+import model.dto.config.MapPathDto;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 仿真场景管理接口：重置与读取
@@ -20,9 +27,11 @@ import java.util.List;
 public class SimAdminController {
 
     private final SimulationEngine engine;
+    private final MapDataService mapDataService;
 
-    public SimAdminController(SimulationEngine engine) {
+    public SimAdminController(SimulationEngine engine, MapDataService mapDataService) {
         this.engine = engine;
+        this.mapDataService = mapDataService;
     }
 
     /**
@@ -38,6 +47,95 @@ public class SimAdminController {
             }
         }
         return Result.success("重置成功");
+    }
+
+    /**
+     * 一键初始化默认仿真场景（便于前端“加载场景 + 动画演示/调试”闭环）
+     * - 地图路网由 MapConfigInitializer 启动时加载（map-config.json）
+     * - 此处仅注入一套最小可运行实体：TRUCK/QC/ASC + 充电桩 + 围栏 + 船舶
+     */
+    @PostMapping("/init")
+    public Result initDefaultScene() {
+        synchronized (engine) {
+            synchronized (GlobalContext.getInstance()) {
+                GlobalContext ctx = GlobalContext.getInstance();
+                ctx.clearAll();
+                engine.reset();
+
+                // 速度参数来自 map-config.json（缺失则使用保底值）
+                double truckSpeed = safeGetParameter("truckSpeed", 5.0);
+                double qcSpeed = safeGetParameter("qcSpeed", 10.0);
+                double ascSpeed = safeGetParameter("ascSpeed", 8.0);
+
+                // 轨道/道路位置来自 map-config.json paths（缺失则使用前端默认沙盘坐标）
+                double truckRoadY = findFirstPathPosition("TRUCK_ROAD", "HORIZONTAL").orElse(200.0);
+                double qcRailY = findFirstPathPosition("QC_RAIL", "HORIZONTAL").orElse(140.0);
+                double ascRailX = findFirstPathPosition("ASC_RAIL", "VERTICAL").orElse(175.0);
+
+                // ============ 设备 ============
+                Truck truck = new Truck();
+                truck.setId("TRUCK_01");
+                truck.setType(DeviceTypeEnum.ELECTRIC_TRUCK);
+                truck.setPosX(0.0);
+                truck.setPosY(truckRoadY);
+                truck.setState(DeviceStateEnum.IDLE);
+                truck.setSpeed(truckSpeed);
+                truck.setPowerLevel(100.0);
+                truck.setConsumeRate(0.01);
+                ctx.getTruckMap().put(truck.getId(), truck);
+
+                QcDevice qc = new QcDevice();
+                qc.setId("QC_01");
+                qc.setType(DeviceTypeEnum.QC);
+                qc.setPosX(80.0);
+                qc.setPosY(qcRailY);
+                qc.setState(DeviceStateEnum.IDLE);
+                qc.setSpeed(qcSpeed);
+                ctx.getQcMap().put(qc.getId(), qc);
+
+                AscDevice asc = new AscDevice();
+                asc.setId("ASC_01");
+                asc.setType(DeviceTypeEnum.ASC);
+                asc.setPosX(ascRailX);
+                asc.setPosY(truckRoadY);
+                asc.setState(DeviceStateEnum.IDLE);
+                asc.setSpeed(ascSpeed);
+                ctx.getAscMap().put(asc.getId(), asc);
+
+                // ============ 基础设施 ============
+                Fence fence = new Fence();
+                fence.setNodeId("FENCE_01");
+                fence.setBlockCode("YARD_A");
+                fence.setPosX(300.0);
+                fence.setPosY(truckRoadY);
+                fence.setRadius(18.0);
+                fence.setSpeedLimit(2.5);
+                fence.setStatus(FenceStateEnum.PASSABLE.getCode());
+                ctx.getFenceMap().put(fence.getNodeId(), fence);
+
+                ChargingStation station = new ChargingStation();
+                station.setStationCode("CS_01");
+                station.setStatus(DeviceStateEnum.IDLE.getCode());
+                station.setPowName("POW_01");
+                station.setBlockCode("YARD_C");
+                station.setRowPosition(1);
+                station.setPosX(750.0);
+                station.setPosY(550.0);
+                station.setChargeRate(5.0);
+                ctx.getChargingStationMap().put(station.getStationCode(), station);
+
+                // ============ 船舶 ============
+                Vessel vessel = new Vessel();
+                vessel.setVesselId("VESSEL_01");
+                vessel.setVesselBerth("BERTH_01");
+                vessel.setBerthLocation(120.0);
+                vessel.setSideTo("L");
+                vessel.setLength(160.0);
+                ctx.getVesselMap().put(vessel.getVesselId(), vessel);
+
+                return Result.success("初始化默认场景成功");
+            }
+        }
     }
 
     /**
@@ -104,5 +202,27 @@ public class SimAdminController {
         // 业务数据
         private List<WorkInstruction> workInstructions;
         private List<Container> containers;
+    }
+
+    private double safeGetParameter(String key, double fallback) {
+        try {
+            return mapDataService.getParameter(key);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private Optional<Double> findFirstPathPosition(String pathType, String direction) {
+        try {
+            return mapDataService.getAllPaths().stream()
+                    .filter(p -> pathType.equalsIgnoreCase(p.getPathType()))
+                    .filter(p -> direction.equalsIgnoreCase(p.getDirection()))
+                    .map(MapPathDto::getPosition)
+                    .filter(v -> v != null)
+                    .sorted(Comparator.naturalOrder())
+                    .findFirst();
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
     }
 }
