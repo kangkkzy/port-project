@@ -506,4 +506,189 @@ public class SimTestController {
 
         return Result.success("已调度完整装船业务流程测试(LOAD)");
     }
+
+    // ==================== 扩展业务测试接口 ====================
+
+    /**
+     * 场内移箱 (YARD_SHIFT)
+     * ASC 从堆场 A 位置抓起箱子，移动到堆场 B 位置放下
+     */
+    @PostMapping("/yard-shift")
+    public Result testYardShift() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 箱子在 YARD_A (X=175, Y=230)
+        Container container = new Container();
+        container.setContainerId("CONT_SHIFT");
+        container.setCurrentPos("YARD_A");
+        container.setPosX(ascRailX1);
+        container.setPosY(230.0);
+        ctx.getContainerMap().put("CONT_SHIFT", container);
+
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_YARD_SHIFT");
+        wi.setContainerId("CONT_SHIFT");
+        wi.setMoveKind(BizTypeEnum.YARD_SHIFT);
+        wi.setFetchCheId("ASC_01");
+        wi.setFromPos("YARD_A");
+        wi.setToPos("YARD_B");
+        ctx.getWorkInstructionMap().put("WI_YARD_SHIFT", wi);
+
+        // ASC 已经在 Y=200 位置
+        ctx.getAscMap().get("ASC_01").setPosY(200.0);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        timeline.assign("ASC_01", "WI_YARD_SHIFT")
+                .fetch("ASC_01", fetchPutDuration)
+                .moveCrane("ASC_01", "MOVE_VERTICAL", 50.0, ascSpeed)  // 移到 YARD_B
+                .put("ASC_01", fetchPutDuration);
+
+        return Result.success("已调度 YARD_SHIFT 移箱测试");
+    }
+
+    /**
+     * 外集卡收箱 (RECV) - 进场落箱
+     * 外集卡从大门开到 ASC 交接位，ASC 从集卡抓箱放入堆场
+     */
+    @PostMapping("/recv")
+    public Result testRecv() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 箱子在集卡上，集卡在 X=300 (大门位置)
+        ctx.getTruckMap().get("TRUCK_01").setPosX(300.0);
+
+        Container container = new Container();
+        container.setContainerId("CONT_RECV");
+        container.setCurrentPos("TRUCK_01");
+        container.setPosX(300.0);
+        container.setPosY(truckRoadY);
+        ctx.getContainerMap().put("CONT_RECV", container);
+
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_RECV");
+        wi.setContainerId("CONT_RECV");
+        wi.setMoveKind(BizTypeEnum.RECV);
+        wi.setFetchCheId("ASC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setFromPos("TRUCK_01");
+        wi.setToPos("YARD_B");
+        ctx.getWorkInstructionMap().put("WI_RECV", wi);
+
+        // ASC 初始位置
+        ctx.getAscMap().get("ASC_01").setPosX(ascRailX1);
+        ctx.getAscMap().get("ASC_01").setPosY(truckRoadY);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        // 集卡从大门开到 ASC 交接位
+        timeline.moveTruck("TRUCK_01", ascRailX1, truckRoadY, truckSpeed)
+                .assign("ASC_01", "WI_RECV")
+                .fetch("ASC_01", fetchPutDuration)
+                .moveCrane("ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed)
+                .put("ASC_01", fetchPutDuration);
+
+        return Result.success("已调度 RECV 收箱测试");
+    }
+
+    /**
+     * 直进 (DIRECT_IN) - 外集卡直接装船
+     * 外集卡从大门直接开到 QC 下方，QC 直接抓箱装船（不经过堆场）
+     */
+    @PostMapping("/direct-in")
+    public Result testDirectIn() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 箱子在集卡上，集卡在 X=300 (大门位置)
+        ctx.getTruckMap().get("TRUCK_01").setPosX(300.0);
+
+        Container container = new Container();
+        container.setContainerId("CONT_DIRECT_IN");
+        container.setCurrentPos("TRUCK_01");
+        container.setPosX(300.0);
+        container.setPosY(truckRoadY);
+        ctx.getContainerMap().put("CONT_DIRECT_IN", container);
+
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_DIRECT_IN");
+        wi.setContainerId("CONT_DIRECT_IN");
+        wi.setMoveKind(BizTypeEnum.DIRECT_IN);
+        wi.setFetchCheId("QC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setFromPos("TRUCK_01");
+        wi.setToPos("VESSEL_01");
+        ctx.getWorkInstructionMap().put("WI_DIRECT_IN", wi);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        // 集卡直接开到 QC 下方
+        timeline.moveTruck("TRUCK_01", 80.0, truckRoadY, truckSpeed)
+                .assign("QC_01", "WI_DIRECT_IN")
+                .fetch("QC_01", fetchPutDuration)
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", -20.0, qcSpeed)
+                .put("QC_01", fetchPutDuration);
+
+        return Result.success("已调度 DIRECT_IN 直进测试");
+    }
+
+    /**
+     * 直提 (DIRECT_OUT) - 卸船直接上外集卡出大门
+     * QC 从船上抓箱放到集卡，集卡直接开出大门
+     */
+    @PostMapping("/direct-out")
+    public Result testDirectOut() {
+        GlobalContext ctx = GlobalContext.getInstance();
+
+        ensureTestEnvironment();
+        resetDevicesToInitialState();
+
+        // 箱子在船上
+        Container container = new Container();
+        container.setContainerId("CONT_DIRECT_OUT");
+        container.setCurrentPos("VESSEL_01");
+        container.setPosX(0.0);
+        container.setPosY(170.0);
+        ctx.getContainerMap().put("CONT_DIRECT_OUT", container);
+
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_DIRECT_OUT");
+        wi.setContainerId("CONT_DIRECT_OUT");
+        wi.setMoveKind(BizTypeEnum.DIRECT_OUT);
+        wi.setFetchCheId("QC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setFromPos("VESSEL_01");
+        wi.setToPos("TRUCK_01");
+        ctx.getWorkInstructionMap().put("WI_DIRECT_OUT", wi);
+
+        // 集卡初始在大门外
+        ctx.getTruckMap().get("TRUCK_01").setPosX(300.0);
+
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
+
+        // 集卡开进到 QC 下方
+        timeline.moveTruck("TRUCK_01", 80.0, truckRoadY, truckSpeed)
+                // QC 抓箱
+                .assign("QC_01", "WI_DIRECT_OUT")
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", -20.0, qcSpeed)
+                .fetch("QC_01", fetchPutDuration)
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", 20.0, qcSpeed)
+                .put("QC_01", fetchPutDuration)
+                // 集卡拉着箱子开出大门
+                .moveTruck("TRUCK_01", 400.0, truckRoadY, truckSpeed);
+
+        return Result.success("已调度 DIRECT_OUT 直提测试");
+    }
 }

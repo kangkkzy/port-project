@@ -59,6 +59,18 @@ public class SimulationEngine implements InitializingBean {
      */
     private volatile boolean globalSuspended = false;
 
+    /**
+     * 回放速度倍率
+     * 1.0 = 实时播放 (1ms 仿真时间 = 1ms 真实时间)
+     * 2.0 = 2倍速, 0.5 = 0.5倍速
+     */
+    private double playbackSpeed = 1.0;
+
+    /**
+     * 是否启用时间同步（用于动画展示）
+     */
+    private boolean timeSyncEnabled = false;
+
     // 暂停现场记录
     private final java.util.Set<common.consts.BizTypeEnum> suspendedBizTypes = ConcurrentHashMap.newKeySet();
     private final java.util.Set<String> suspendedEventIds = ConcurrentHashMap.newKeySet();
@@ -173,6 +185,59 @@ public class SimulationEngine implements InitializingBean {
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
 
+    // ==================== 播放控制 ====================
+
+    /**
+     * 设置回放速度倍率
+     * @param speed 速度倍率 (1.0 = 实时, 2.0 = 2倍速, 0.5 = 0.5倍速)
+     */
+    public void setPlaybackSpeed(double speed) {
+        this.playbackSpeed = speed;
+        log.info("回放速度已设置为: {}x", speed);
+    }
+
+    public double getPlaybackSpeed() {
+        return playbackSpeed;
+    }
+
+    /**
+     * 启用/禁用时间同步
+     * 启用后，引擎在事件间会等待真实时间（用于前端动画展示）
+     */
+    public void setTimeSyncEnabled(boolean enabled) {
+        this.timeSyncEnabled = enabled;
+        log.info("时间同步已{}", enabled ? "启用" : "禁用");
+    }
+
+    public boolean isTimeSyncEnabled() {
+        return timeSyncEnabled;
+    }
+
+    /**
+     * 时间同步：将仿真时间与真实时间对齐
+     * 根据 playbackSpeed 计算需要等待的真实时间
+     */
+    private void syncToRealTime(long targetSimTime) {
+        long currentSimTime = context.getSimTime();
+        long timeDelta = targetSimTime - currentSimTime;
+
+        if (timeDelta <= 0) {
+            return;
+        }
+
+        // 根据播放速度计算真实需要等待的时间
+        long realTimeToSleep = (long) (timeDelta / playbackSpeed);
+
+        if (realTimeToSleep > 0) {
+            try {
+                Thread.sleep(realTimeToSleep);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("时间同步被中断");
+            }
+        }
+    }
+
     /**
      * 单步执行
      * 供前端单步调试或 runUntil 内部调用。
@@ -283,6 +348,11 @@ public class SimulationEngine implements InitializingBean {
             } else {
                 lastProcessedTime = nextEvent.getTriggerTime();
                 sameTimeEventCount = 1;
+            }
+
+            // 时间同步睡眠（用于前端动画展示）
+            if (timeSyncEnabled) {
+                syncToRealTime(nextEvent.getTriggerTime());
             }
 
             eventQueue.poll();

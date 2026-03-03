@@ -23,6 +23,13 @@ public class PortSnapshotDto {
      */
     private List<VesselSnapshotDto> vessels;
     private List<WorkInstructionSnapshotDto> workInstructions;
+
+    /**
+     * 集装箱快照（用于前端渲染）
+     */
+    private List<ContainerSnapshotDto> containers;
 }
+
+
 
 

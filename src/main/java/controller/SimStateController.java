@@ -43,6 +43,7 @@ public class SimStateController {
         snapshot.setChargingStations(buildChargingStationSnapshots(ctx));
         snapshot.setVessels(buildVesselSnapshots(ctx));
         snapshot.setWorkInstructions(buildWiSnapshots(ctx));
+        snapshot.setContainers(buildContainerSnapshots(ctx));
 
         return Result.success("查询成功", snapshot);
     }
@@ -148,6 +149,21 @@ public class SimStateController {
             dto.setToPos(wi.getToPos());
             dto.setWiStatus(wi.getWiStatus());
             dto.setDispatchCheId(wi.getDispatchCheId());
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 构建集装箱快照
+     */
+    private List<ContainerSnapshotDto> buildContainerSnapshots(GlobalContext ctx) {
+        return ctx.getContainerMap().values().stream().map(container -> {
+            ContainerSnapshotDto dto = new ContainerSnapshotDto();
+            dto.setContainerId(container.getContainerId());
+            dto.setCurrentPos(container.getCurrentPos());
+            dto.setStatus(container.getStatus());
+            dto.setPosX(container.getPosX());
+            dto.setPosY(container.getPosY());
             return dto;
         }).collect(Collectors.toList());
     }
