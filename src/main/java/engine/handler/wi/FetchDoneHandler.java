@@ -19,6 +19,7 @@ import model.entity.WorkInstruction;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import service.algorithm.MapDataService;
+import model.dto.config.TransferZoneDto;
 
 /**
  * 抓箱完成 (FETCH_DONE)
@@ -100,6 +101,24 @@ public class FetchDoneHandler implements SimEventHandler {
             if (c != null && c.getCurrentPos().equals(wi.getCarryCheId())) {
                 BaseDevice truck = context.getDevice(wi.getCarryCheId());
                 if (truck != null) {
+                    // 交接区域校验：QC/ASC 与集卡必须在同一交接区域内
+                    String zoneType = device.getType() == DeviceTypeEnum.QC ? "QC" : "ASC";
+                    boolean inValidZone = mapDataService.isTransferZoneValid(
+                            zoneType,
+                            device.getPosX(), device.getPosY(),
+                            truck.getPosX(), truck.getPosY()
+                    );
+
+                    if (!inValidZone) {
+                        TransferZoneDto zone = zoneType.equals("QC")
+                                ? mapDataService.getTransferZoneForQc(device.getPosX())
+                                : mapDataService.getTransferZoneForAsc(device.getPosX());
+                        String zoneName = zone != null ? zone.getName() : "未知";
+                        log.error("严重错误: 事件[FETCH_DONE]: 设备 [{}] 与集卡 [{}] 不在交接区域内，无法抓箱。设备坐标: ({}, {}), 集卡坐标: ({}, {}), 区域: {}",
+                                deviceId, truck.getId(), device.getPosX(), device.getPosY(), truck.getPosX(), truck.getPosY(), zoneName);
+                        throw new BusinessException(String.format("设备 [%s] 与集卡 [%s] 不在交接区域内，无法抓箱", deviceId, truck.getId()));
+                    }
+
                     // 根据设备类型选择校验方式
                     double allowedSpan = getAllowedOperationSpan(device, truck);
                     double actualDist = GisUtil.getDistance(

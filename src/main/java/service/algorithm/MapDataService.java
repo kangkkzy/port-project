@@ -82,4 +82,64 @@ public interface MapDataService {
      */
     double getOperationSpan(String deviceType, double truckY);
 
+    /**
+     * 根据路径类型获取路径列表
+     * @param pathType 路径类型 (TRUCK_ROAD, QC_RAIL, ASC_RAIL)
+     * @return 路径列表
+     */
+    List<MapPathDto> getPathsByType(String pathType);
+
+    /**
+     * 获取 QC 轨道（单条）
+     * @return QC 轨道配置
+     */
+    MapPathDto getQcRail();
+
+    /**
+     * 获取所有 ASC 轨道
+     * @return ASC 轨道列表
+     */
+    List<MapPathDto> getAscRails();
+
+    /**
+     * 获取指定 X 坐标最近的 ASC 轨道
+     * @param x X 坐标
+     * @return 最近的 ASC 轨道
+     */
+    MapPathDto getAscRailAtPosition(double x);
+
+    /**
+     * 判断点是否在任何交接区域内
+     * @param zoneType 区域类型 (QC, ASC, null表示所有)
+     * @param x X 坐标
+     * @param y Y 坐标
+     * @return 是否在交接区域内
+     */
+    boolean isPointInTransferZone(String zoneType, double x, double y);
+
+    /**
+     * 获取 QC 对应的交接区域
+     * @param qcX QC 的 X 坐标
+     * @return 交接区域配置
+     */
+    TransferZoneDto getTransferZoneForQc(double qcX);
+
+    /**
+     * 获取 ASC 对应的交接区域
+     * @param ascX ASC 的 X 坐标
+     * @return 交接区域配置
+     */
+    TransferZoneDto getTransferZoneForAsc(double ascX);
+
+    /**
+     * 校验交接区域是否有效（设备双方都在同一交接区内）
+     * @param zoneType 区域类型 (QC, ASC)
+     * @param craneX 起重机 X 坐标
+     * @param craneY 起重机 Y 坐标
+     * @param truckX 集卡 X 坐标
+     * @param truckY 集卡 Y 坐标
+     * @return 交接是否合法
+     */
+    boolean isTransferZoneValid(String zoneType, double craneX, double craneY, double truckX, double truckY);
+
 }

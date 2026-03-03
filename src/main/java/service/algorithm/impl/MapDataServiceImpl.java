@@ -279,4 +279,123 @@ public class MapDataServiceImpl implements MapDataService {
         return 0.0;
     }
 
+    @Override
+    public List<MapPathDto> getPathsByType(String pathType) {
+        List<MapPathDto> result = new ArrayList<>();
+        for (MapPathDto path : pathList) {
+            if (path.getPathType().equals(pathType)) {
+                result.add(path);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public MapPathDto getQcRail() {
+        List<MapPathDto> qcRails = getPathsByType("QC_RAIL");
+        return qcRails.isEmpty() ? null : qcRails.get(0);
+    }
+
+    @Override
+    public List<MapPathDto> getAscRails() {
+        return getPathsByType("ASC_RAIL");
+    }
+
+    @Override
+    public MapPathDto getAscRailAtPosition(double x) {
+        List<MapPathDto> ascRails = getAscRails();
+        if (ascRails.isEmpty()) return null;
+
+        MapPathDto closest = null;
+        double minDistance = Double.MAX_VALUE;
+        for (MapPathDto rail : ascRails) {
+            double distance = Math.abs(rail.getPosition() - x);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closest = rail;
+            }
+        }
+        return closest;
+    }
+
+    @Override
+    public boolean isPointInTransferZone(String zoneType, double x, double y) {
+        for (TransferZoneDto zone : transferZoneList) {
+            if (zoneType != null && !zoneType.isEmpty()) {
+                if (zoneType.startsWith("QC") && !zone.getZoneId().startsWith("QC_TRANSFER")) continue;
+                if (zoneType.startsWith("ASC") && !zone.getZoneId().startsWith("ASC_TRANSFER")) continue;
+            }
+
+            Double[] xRange = zone.getxRange();
+            Double[] yRange = zone.getyRange();
+            if (xRange != null && yRange != null) {
+                if (x >= xRange[0] && x <= xRange[1] && y >= yRange[0] && y <= yRange[1]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public TransferZoneDto getTransferZoneForQc(double qcX) {
+        for (TransferZoneDto zone : transferZoneList) {
+            if (!zone.getZoneId().startsWith("QC_TRANSFER")) continue;
+
+            Double[] xRange = zone.getxRange();
+            if (xRange != null && qcX >= xRange[0] && qcX <= xRange[1]) {
+                return zone;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public TransferZoneDto getTransferZoneForAsc(double ascX) {
+        for (TransferZoneDto zone : transferZoneList) {
+            if (!zone.getZoneId().startsWith("ASC_TRANSFER")) continue;
+
+            Double[] xRange = zone.getxRange();
+            if (xRange != null && ascX >= xRange[0] && ascX <= xRange[1]) {
+                return zone;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public boolean isTransferZoneValid(String zoneType, double craneX, double craneY, double truckX, double truckY) {
+        double tolerance = 0.0;
+        try {
+            tolerance = getParameter("transferZoneTolerance");
+        } catch (Exception e) {
+            tolerance = 5.0;
+        }
+
+        for (TransferZoneDto zone : transferZoneList) {
+            boolean isQcZone = zone.getZoneId().startsWith("QC_TRANSFER");
+            boolean isAscZone = zone.getZoneId().startsWith("ASC_TRANSFER");
+
+            if ("QC".equals(zoneType) && !isQcZone) continue;
+            if ("ASC".equals(zoneType) && !isAscZone) continue;
+
+            Double[] xRange = zone.getxRange();
+            Double[] yRange = zone.getyRange();
+            if (xRange == null || yRange == null) continue;
+
+            double xMin = xRange[0] - tolerance;
+            double xMax = xRange[1] + tolerance;
+            double yMin = yRange[0] - tolerance;
+            double yMax = yRange[1] + tolerance;
+
+            boolean craneInZone = craneX >= xMin && craneX <= xMax && craneY >= yMin && craneY <= yMax;
+            boolean truckInZone = truckX >= xMin && truckX <= xMax && truckY >= yMin && truckY <= yMax;
+
+            if (craneInZone && truckInZone) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }

@@ -40,27 +40,66 @@
       <div class="left-section">
         <div class="map-container">
           <v-stage :config="stageConfig" @click="handleStageClick">
-            <v-layer>
-              <v-rect :config="{ x: 0, y: 0, width: 800, height: 100, fill: '#bbdefb', name: 'bg' }" />
-              <v-text :config="{ x: 20, y: 40, text: '海域 / 船泊区 (VESSEL)', fontSize: 24, fill: '#1565c0', opacity: 0.5, name: 'bg' }" />
-              <v-rect :config="{ x: 0, y: 100, width: 800, height: 80, fill: '#e0e0e0', name: 'bg' }" />
+            <!-- 第1层：背景层 - 海域和堆场底图 -->
+            <v-layer name="background">
+              <v-rect :config="{ x: 0, y: 0, width: 800, height: 120, fill: '#bbdefb', name: 'bg' }" />
+              <v-text :config="{ x: 20, y: 50, text: '海域 / 船泊区 (VESSEL)', fontSize: 24, fill: '#1565c0', opacity: 0.5, name: 'bg' }" />
+              <!-- 堆场背景 -->
+              <v-rect v-for="(yard, idx) in yardAreas" :key="'yard-bg-'+idx" :config="{ x: yard.x, y: yard.y, width: yard.width, height: yard.height, fill: yard.fill, stroke: yard.stroke, strokeWidth: 2, name: 'bg' }" />
+            </v-layer>
 
+            <!-- 第2层：轨道层 - QC轨道(红色虚线)和ASC轨道(紫色虚线) -->
+            <v-layer name="rails">
               <v-line
-                  v-for="(path, idx) in simStore.mapPaths"
-                  :key="'path-'+idx"
+                  v-for="(path, idx) in qcRails"
+                  :key="'qc-rail-'+idx"
+                  :config="{
+                  points: [path.startPoint, path.position, path.endPoint, path.position],
+                  stroke: '#e53935',
+                  strokeWidth: 3,
+                  dash: [15, 10],
+                  opacity: 0.8,
+                  name: 'rail'
+                }"
+              />
+              <v-line
+                  v-for="(path, idx) in ascRails"
+                  :key="'asc-rail-'+idx"
+                  :config="{
+                  points: [path.position, path.startPoint, path.position, path.endPoint],
+                  stroke: '#8e24aa',
+                  strokeWidth: 3,
+                  dash: [15, 10],
+                  opacity: 0.8,
+                  name: 'rail'
+                }"
+              />
+              <!-- 轨道标签 -->
+              <v-text :config="{ x: 30, y: 115, text: 'QC轨道(红色)', fontSize: 10, fill: '#e53935', name: 'rail' }" />
+              <v-text :config="{ x: 120, y: 255, text: 'ASC轨道(紫色)', fontSize: 10, fill: '#8e24aa', name: 'rail' }" />
+            </v-layer>
+
+            <!-- 第3层：道路层 - 集卡道路网(黄色实线) -->
+            <v-layer name="roads">
+              <v-line
+                  v-for="(path, idx) in truckRoads"
+                  :key="'truck-road-'+idx"
                   :config="{
                   points: path.direction === 'HORIZONTAL'
                           ? [path.startPoint, path.position, path.endPoint, path.position]
                           : [path.position, path.startPoint, path.position, path.endPoint],
-                  stroke: path.pathType === 'TRUCK_ROAD' ? '#ffb300' : (path.pathType === 'QC_RAIL' ? '#e53935' : '#8e24aa'),
-                  strokeWidth: path.pathType === 'TRUCK_ROAD' ? 10 : 4,
-                  dash: path.pathType.includes('RAIL') ? [15, 10] : [],
-                  opacity: 0.5,
-                  name: 'bg'
+                  stroke: '#ffb300',
+                  strokeWidth: 8,
+                  opacity: 0.7,
+                  lineCap: 'round',
+                  name: 'road'
                 }"
               />
+              <v-text :config="{ x: 30, y: 145, text: '集卡道路(黄色)', fontSize: 10, fill: '#ffb300', name: 'road' }" />
+            </v-layer>
 
-              <!-- 交接区域显示 -->
+            <!-- 第4层：交接区域层 - QC交接区(橙色)和ASC交接区(绿色) -->
+            <v-layer name="transfer-zones">
               <v-rect
                   v-for="zone in simStore.transferZones"
                   :key="'zone-'+zone.zoneId"
@@ -69,11 +108,11 @@
                   y: zone.yRange[0],
                   width: zone.xRange[1] - zone.xRange[0],
                   height: zone.yRange[1] - zone.yRange[0],
-                  fill: zone.zoneId.startsWith('QC') ? 'rgba(255, 152, 0, 0.2)' : 'rgba(76, 175, 80, 0.2)',
+                  fill: zone.zoneId.startsWith('QC') ? 'rgba(255, 152, 0, 0.25)' : 'rgba(76, 175, 80, 0.25)',
                   stroke: zone.zoneId.startsWith('QC') ? '#ff9800' : '#4caf50',
                   strokeWidth: 2,
-                  dash: [5, 5],
-                  name: 'bg'
+                  dash: [8, 4],
+                  name: 'transfer'
                 }"
               />
               <v-text
@@ -81,16 +120,18 @@
                   :key="'zone-label-'+zone.zoneId"
                   :config="{
                   x: zone.xRange[0] + 5,
-                  y: zone.yRange[0] + 5,
+                  y: zone.yRange[0] + 3,
                   text: zone.name,
-                  fontSize: 10,
+                  fontSize: 9,
+                  fontStyle: 'bold',
                   fill: zone.zoneId.startsWith('QC') ? '#e65100' : '#1b5e20',
-                  name: 'bg'
+                  name: 'transfer'
                 }"
               />
+            </v-layer>
 
-              <v-rect v-for="x in [100, 350, 600]" :key="'yard-'+x" :config="{ x: x, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c', strokeWidth: 2, name: 'bg' }" />
-
+            <!-- 第5层：设备层 - 围栏、充电桩、集装箱、船舶 -->
+            <v-layer name="facilities">
               <v-circle v-for="fence in simStore.fences" :key="fence.nodeId" :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
               <v-rect v-for="station in simStore.chargingStations" :key="station.stationCode" :config="{ x: station.posX - 8, y: station.posY - 8, width: 16, height: 16, fill: '#ffeb3b', stroke: '#f57f17', strokeWidth: 2, cornerRadius: 3 }" />
               <v-rect v-for="c in simStore.containers" :key="c.containerId" :config="{ x: (c.posX || 0) - 6, y: (c.posY || 0) - 6, width: 12, height: 12, fill: '#ff7043', stroke: '#bf360c', strokeWidth: 1, cornerRadius: 2 }" />
@@ -98,7 +139,8 @@
               <v-text v-for="v in simStore.vessels" :key="v.vesselId + '-label'" :config="{ x: (v.berthLocation || 0) - 30, y: 65, text: v.vesselId, fontSize: 12, fill: '#0d47a1', fontStyle: 'bold' }" />
             </v-layer>
 
-            <v-layer>
+            <!-- 第6层：设备动态层 - QC、ASC、集卡 -->
+            <v-layer name="devices">
               <v-group v-for="dev in displayDevices" :key="dev.id" :config="{ x: dev.posX, y: dev.posY }">
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
                   <v-rect :config="{ x: -20, y: -25, width: 40, height: 50, fill: 'transparent', stroke: '#ff9800', strokeWidth: 4 }" />
@@ -258,7 +300,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
 import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading, testYardShift, testRecv, testDirectIn, testDirectOut, testQcHorizontalVertical, testAscHorizontalVertical } from '../api/simulation'
@@ -273,6 +315,18 @@ const selectedDeviceType = ref('')
 const selectedDeviceState = ref('')
 const selectedDevicePower = ref<number | null>(null)
 const logContainer = ref<HTMLElement | null>(null)
+
+// 计算属性：按类型分组路径
+const qcRails = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'QC_RAIL'))
+const ascRails = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'ASC_RAIL'))
+const truckRoads = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'TRUCK_ROAD'))
+
+// 堆场区域配置
+const yardAreas = computed(() => [
+  { x: 100, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' },
+  { x: 350, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' },
+  { x: 600, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' }
+])
 
 const isInitLoading = ref(false)
 const isTestLoading = ref(false)

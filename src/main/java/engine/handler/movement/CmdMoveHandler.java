@@ -71,6 +71,20 @@ public class CmdMoveHandler implements SimEventHandler {
         double endX = target.getX();
         double endY = target.getY();
 
+        // 集卡道路校验：确保目标点在集卡道路上
+        double truckTolerance = 5.0;
+        try {
+            truckTolerance = mapDataService.getParameter("truckRoadTolerance");
+        } catch (Exception e) {
+            // 使用默认值
+        }
+        boolean targetOnRoad = mapDataService.isPositionOnPath(device.getType().name(), endX, endY);
+        if (!targetOnRoad) {
+            log.error("严重错误: 集卡 [{}] 移动目标坐标 ({}, {}) 不在集卡道路网上，触发熔断暂停",
+                    truckId, endX, endY);
+            throw new BusinessException(String.format("集卡 [%s] 移动目标坐标 (%.1f, %.1f) 不在集卡道路网上", truckId, endX, endY));
+        }
+
         List<Point> remainingTargets = new ArrayList<>();
 
         // === 精确模式：外部算法已提供轨迹点列表 ===
