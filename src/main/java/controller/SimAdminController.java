@@ -71,12 +71,19 @@ public class SimAdminController {
                 double truckRoadY = findFirstPathPosition("TRUCK_ROAD", "HORIZONTAL").orElse(200.0);
                 double qcRailY = findFirstPathPosition("QC_RAIL", "HORIZONTAL").orElse(140.0);
                 double ascRailX = findFirstPathPosition("ASC_RAIL", "VERTICAL").orElse(175.0);
+                // ASC 还需要获取轨道的起止点范围，初始化在起点位置
+                double[] ascRailRange = findFirstPathRange("ASC_RAIL", "VERTICAL").orElse(new double[]{0.0, 800.0});
+                double ascRailStartY = ascRailRange[0];
+                double ascRailEndY = ascRailRange[1];
+                // 获取集卡道路的起止点范围，用于设置集卡的初始 X 坐标
+                double[] truckRoadRange = findFirstPathRange("TRUCK_ROAD", "HORIZONTAL").orElse(new double[]{0.0, 800.0});
+                double truckRoadStartX = truckRoadRange[0];
 
                 // ============ 设备 ============
                 Truck truck = new Truck();
                 truck.setId("TRUCK_01");
                 truck.setType(DeviceTypeEnum.ELECTRIC_TRUCK);
-                truck.setPosX(0.0);
+                truck.setPosX(truckRoadStartX);  // 在集卡道路的起点 X
                 truck.setPosY(truckRoadY);
                 truck.setState(DeviceStateEnum.IDLE);
                 truck.setSpeed(truckSpeed);
@@ -97,7 +104,7 @@ public class SimAdminController {
                 asc.setId("ASC_01");
                 asc.setType(DeviceTypeEnum.ASC);
                 asc.setPosX(ascRailX);
-                asc.setPosY(truckRoadY);
+                asc.setPosY(ascRailStartY);  // ASC 在垂直轨道起点
                 asc.setState(DeviceStateEnum.IDLE);
                 asc.setSpeed(ascSpeed);
                 ctx.getAscMap().put(asc.getId(), asc);
@@ -220,6 +227,23 @@ public class SimAdminController {
                     .map(MapPathDto::getPosition)
                     .filter(v -> v != null)
                     .sorted(Comparator.naturalOrder())
+                    .findFirst();
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 获取指定类型和方向的第一条路径的起止点范围
+     */
+    private Optional<double[]> findFirstPathRange(String pathType, String direction) {
+        try {
+            return mapDataService.getAllPaths().stream()
+                    .filter(p -> pathType.equalsIgnoreCase(p.getPathType()))
+                    .filter(p -> direction.equalsIgnoreCase(p.getDirection()))
+                    .filter(p -> p.getStartPoint() != null && p.getEndPoint() != null)
+                    .sorted(Comparator.comparing(MapPathDto::getPosition))
+                    .map(p -> new double[]{p.getStartPoint(), p.getEndPoint()})
                     .findFirst();
         } catch (Exception ignored) {
             return Optional.empty();

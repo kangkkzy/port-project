@@ -430,7 +430,12 @@ const handleTruckMove = async () => {
 
 const handleCraneMove = async () => {
   try {
-    await moveCrane({ craneId: selectedDeviceId.value, moveType: craneMoveType.value, distance: craneMoveDistance.value, speed: craneMoveSpeed.value })
+    let moveType = craneMoveType.value
+    // ASC 严格限制在紫色轨道上，只允许垂直移动
+    if (selectedDeviceType.value === 'ASC' && moveType === 'MOVE_HORIZONTAL') {
+      moveType = 'MOVE_VERTICAL'
+    }
+    await moveCrane({ craneId: selectedDeviceId.value, moveType, distance: craneMoveDistance.value, speed: craneMoveSpeed.value })
     ElMessage.success('移动指令已下发')
     showCraneMoveDialog.value = false
     await simStore.updateSnapshot()
@@ -595,39 +600,22 @@ const handleStageClick = async (e: any) => {
         });
       }
     } else if (selectedDeviceType.value === 'ASC') {
-      // ASC 既可以沿纵向轨道移动（龙门），也可以水平跨越堆场和集卡车道
+      // ASC 严格限制在紫色虚线轨道上，只允许沿轨道做垂直移动
       const rail = getAscRailForDevice(device.posX);
       if (!rail) {
         ElMessage.error('当前地图未配置ASC轨道');
         return;
       }
-      const dx = pos.x - device.posX;
-      const dy = pos.y - device.posY;
-
-      // 根据用户点击方向，自动判断本次是水平还是垂直移动
-      if (Math.abs(dx) >= Math.abs(dy)) {
-        // 水平移动：保持Y不变，只改变X
-        const distance = dx;
-        if (Math.abs(distance) > 1) {
-          await moveCrane({
-            craneId: device.id,
-            moveType: 'MOVE_HORIZONTAL',
-            distance,
-            speed: 10.0
-          });
-        }
-      } else {
-        // 垂直移动：投影到最近的ASC竖向轨道上，保持X在轨道位置
-        const targetY = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.y));
-        const distance = targetY - device.posY;
-        if (Math.abs(distance) > 1) {
-          await moveCrane({
-            craneId: device.id,
-            moveType: 'MOVE_VERTICAL',
-            distance,
-            speed: 10.0
-          });
-        }
+      // 将点击点投影到该 ASC 轨道的 Y 范围内
+      const targetY = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.y));
+      const distance = targetY - device.posY;
+      if (Math.abs(distance) > 1) {
+        await moveCrane({
+          craneId: device.id,
+          moveType: 'MOVE_VERTICAL',
+          distance,
+          speed: 10.0
+        });
       }
     } else {
       // 集卡：点击位置先投影到最近的道路，再下发移动指令

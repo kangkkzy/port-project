@@ -27,6 +27,21 @@ public class MapPathDto {
     private String pathType;
 
     /**
+     * 路径ID (可选)
+     */
+    private String pathId;
+
+    /**
+     * 路径名称 (可选)
+     */
+    private String name;
+
+    /**
+     * 路径描述 (可选)
+     */
+    private String description;
+
+    /**
      * 路径方向
      * HORIZONTAL - 水平方向（y坐标固定，x变化）
      * VERTICAL - 垂直方向（x坐标固定，y变化）
@@ -81,6 +96,15 @@ public class MapPathDto {
 
     public String getPathType() { return pathType; }
     public void setPathType(String pathType) { this.pathType = pathType; }
+
+    public String getPathId() { return pathId; }
+    public void setPathId(String pathId) { this.pathId = pathId; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
     public String getDirection() { return direction; }
     public void setDirection(String direction) { this.direction = direction; }

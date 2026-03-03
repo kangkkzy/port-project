@@ -8,6 +8,7 @@ import common.consts.EventTypeEnum;
 import engine.SimulationEngine;
 import engine.SimEvent;
 import engine.context.GlobalContext;
+import model.dto.config.MapPathDto;
 import model.entity.AscDevice;
 import model.entity.BaseDevice;
 import model.entity.Container;
@@ -18,14 +19,18 @@ import model.entity.WorkInstruction;
 import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
 import model.dto.request.MoveCommandReq;
+import service.algorithm.MapDataService;
 
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors; // 【新增】引入 Collectors
 
 /**
  * 仿真测试场景接口 - 使用 TimelineBuilder 链式构建安全时间轴
@@ -34,22 +39,25 @@ import java.util.Map;
  * - 在 TimelineBuilder 内部维护虚拟坐标，用于计算时间轴
  * - 不修改 GlobalContext 中的真实坐标（由引擎在事件执行时更新）
  * - 避免"过早坐标变异"导致的物理校验失败
+ *
+ * 道路/轨道位置从 map-config.json 动态读取
  */
 @RestController
 @RequestMapping("/sim/test")
 public class SimTestController {
 
     private final SimulationEngine engine;
+    private final MapDataService mapDataService;
 
-    // 地图配置参数
-    private double truckSpeed = 5.0;
-    private double qcSpeed = 10.0;
-    private double ascSpeed = 8.0;
-    private double qcRailY = 140.0;        // QC轨道Y坐标
-    private double truckRoadY = 200.0;      // 集卡道路Y坐标
-    private double ascRailX1 = 175.0;
-    private double ascRailX2 = 425.0;
-    private double ascRailX3 = 675.0;
+    // 地图配置参数（从 map-config.json 动态获取）
+    private double truckSpeed = 10.0;
+    private double qcSpeed = 1.5;
+    private double ascSpeed = 2.0;
+    private double qcRailY = 120.0;        // QC轨道Y坐标 (来自map-config.json)
+    private double truckRoadY = 150.0;      // 集卡道路Y坐标 (来自map-config.json第一条水平道路)
+    private double truckRoadStartX = 50.0; // 集卡道路起点X坐标
+    private double ascRailX = 175.0;       // ASC轨道X坐标 (来自map-config.json第一条垂直轨道)
+    private double ascRailStartY = 260.0;  // ASC轨道起点Y坐标
 
     // 操作耗时配置
     private int fetchPutDuration = 3000;    // 抓放箱操作耗时(ms)
@@ -60,8 +68,57 @@ public class SimTestController {
     // √(60² + 25²) = √(3600 + 625) = √4225 = 65米（刚好满足）
     private double qcMaxHorizontalMove = 20.0;  // QC横向移动距离（保守值）
 
-    public SimTestController(SimulationEngine engine) {
+    public SimTestController(SimulationEngine engine, MapDataService mapDataService) {
         this.engine = engine;
+        this.mapDataService = mapDataService;
+        initPathPositions();
+    }
+
+    /**
+     * 从 map-config.json 初始化道路/轨道位置
+     */
+    private void initPathPositions() {
+        try {
+            // 获取QC轨道位置
+            List<MapPathDto> qcPaths = mapDataService.getAllPaths().stream()
+                    .filter(p -> "QC_RAIL".equalsIgnoreCase(p.getPathType()))
+                    .filter(p -> "HORIZONTAL".equalsIgnoreCase(p.getDirection()))
+                    .sorted(Comparator.comparing(MapPathDto::getPosition))
+                    .collect(Collectors.toList()); // 【修改】适配 Java 8/11
+            if (!qcPaths.isEmpty()) {
+                qcRailY = qcPaths.get(0).getPosition();
+            }
+
+            // 获取集卡道路位置（第一条水平道路）
+            List<MapPathDto> truckPaths = mapDataService.getAllPaths().stream()
+                    .filter(p -> "TRUCK_ROAD".equalsIgnoreCase(p.getPathType()))
+                    .filter(p -> "HORIZONTAL".equalsIgnoreCase(p.getDirection()))
+                    .sorted(Comparator.comparing(MapPathDto::getPosition))
+                    .collect(Collectors.toList()); // 【修改】适配 Java 8/11
+            if (!truckPaths.isEmpty()) {
+                truckRoadY = truckPaths.get(0).getPosition();
+                truckRoadStartX = truckPaths.get(0).getStartPoint();
+            }
+
+            // 获取ASC轨道位置（第一条垂直轨道）
+            List<MapPathDto> ascPaths = mapDataService.getAllPaths().stream()
+                    .filter(p -> "ASC_RAIL".equalsIgnoreCase(p.getPathType()))
+                    .filter(p -> "VERTICAL".equalsIgnoreCase(p.getDirection()))
+                    .sorted(Comparator.comparing(MapPathDto::getPosition))
+                    .collect(Collectors.toList()); // 【修改】适配 Java 8/11
+            if (!ascPaths.isEmpty()) {
+                ascRailX = ascPaths.get(0).getPosition();
+                ascRailStartY = ascPaths.get(0).getStartPoint();
+            }
+
+            // 获取速度参数
+            try { truckSpeed = mapDataService.getParameter("truckSpeed"); } catch (Exception ignored) {}
+            try { qcSpeed = mapDataService.getParameter("qcSpeed"); } catch (Exception ignored) {}
+            try { ascSpeed = mapDataService.getParameter("ascSpeed"); } catch (Exception ignored) {}
+
+        } catch (Exception e) {
+            // 使用默认值
+        }
     }
 
     /**
@@ -141,7 +198,8 @@ public class SimTestController {
             // 从虚拟坐标获取起点
             Point startPos = virtualTruckPos.get(truckId);
             if (startPos == null) {
-                startPos = new Point(0.0, truckRoadY);
+                // 使用正确的集卡道路位置
+                startPos = new Point(truckRoadStartX, truckRoadY);
                 virtualTruckPos.put(truckId, startPos);
             }
 
@@ -175,7 +233,8 @@ public class SimTestController {
             // 从虚拟坐标获取起点
             Point startPos = virtualCranePos.get(craneId);
             if (startPos == null) {
-                startPos = new Point(0.0, qcRailY);
+                // 使用正确的QC轨道位置
+                startPos = new Point(truckRoadStartX, qcRailY);
                 virtualCranePos.put(craneId, startPos);
             }
 
@@ -246,13 +305,13 @@ public class SimTestController {
     private void ensureTestEnvironment() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 初始化集卡
+        // 初始化集卡（在集卡道路上）
         Truck truck = ctx.getTruckMap().get("TRUCK_01");
         if (truck == null) {
             truck = new Truck();
             truck.setId("TRUCK_01");
             truck.setType(DeviceTypeEnum.ELECTRIC_TRUCK);
-            truck.setPosX(0.0);
+            truck.setPosX(truckRoadStartX);
             truck.setPosY(truckRoadY);
             truck.setState(DeviceStateEnum.IDLE);
             truck.setSpeed(truckSpeed);
@@ -261,27 +320,27 @@ public class SimTestController {
             ctx.getTruckMap().put("TRUCK_01", truck);
         }
 
-        // 初始化QC (posY = qcRailY = 140)
+        // 初始化QC (在QC轨道上)
         QcDevice qc = ctx.getQcMap().get("QC_01");
         if (qc == null) {
             qc = new QcDevice();
             qc.setId("QC_01");
             qc.setType(DeviceTypeEnum.QC);
-            qc.setPosX(0.0);
+            qc.setPosX(truckRoadStartX);  // 从集卡道路起点开始
             qc.setPosY(qcRailY);
             qc.setState(DeviceStateEnum.IDLE);
             qc.setSpeed(qcSpeed);
             ctx.getQcMap().put("QC_01", qc);
         }
 
-        // 初始化ASC (posY = truckRoadY = 200，与集卡同一水平线)
+        // 初始化ASC（在ASC垂直轨道起点）
         AscDevice asc = ctx.getAscMap().get("ASC_01");
         if (asc == null) {
             asc = new AscDevice();
             asc.setId("ASC_01");
             asc.setType(DeviceTypeEnum.ASC);
-            asc.setPosX(ascRailX1);
-            asc.setPosY(truckRoadY);  // ASC在Y=200与集卡交接
+            asc.setPosX(ascRailX);
+            asc.setPosY(ascRailStartY);  // 在ASC垂直轨道起点
             asc.setState(DeviceStateEnum.IDLE);
             asc.setSpeed(ascSpeed);
             ctx.getAscMap().put("ASC_01", asc);
@@ -293,7 +352,7 @@ public class SimTestController {
 
         Truck truck = ctx.getTruckMap().get("TRUCK_01");
         if (truck != null) {
-            truck.setPosX(0.0);
+            truck.setPosX(truckRoadStartX);
             truck.setPosY(truckRoadY);
             truck.setState(DeviceStateEnum.IDLE);
             truck.setCurrWiRefNo(null);
@@ -303,7 +362,7 @@ public class SimTestController {
 
         QcDevice qc = ctx.getQcMap().get("QC_01");
         if (qc != null) {
-            qc.setPosX(0.0);
+            qc.setPosX(truckRoadStartX);
             qc.setPosY(qcRailY);
             qc.setState(DeviceStateEnum.IDLE);
             qc.setCurrWiRefNo(null);
@@ -312,8 +371,8 @@ public class SimTestController {
 
         AscDevice asc = ctx.getAscMap().get("ASC_01");
         if (asc != null) {
-            asc.setPosX(ascRailX1);
-            asc.setPosY(truckRoadY);  // ASC在Y=200与集卡交接
+            asc.setPosX(ascRailX);
+            asc.setPosY(ascRailStartY);
             asc.setState(DeviceStateEnum.IDLE);
             asc.setCurrWiRefNo(null);
             asc.setCurrentTargetPos(null);
@@ -370,7 +429,7 @@ public class SimTestController {
                 .put("QC_01", fetchPutDuration);
 
         // === 阶段2: 集卡移动到ASC下方 ===
-        timeline.moveTruck("TRUCK_01", ascRailX1, truckRoadY, truckSpeed);
+        timeline.moveTruck("TRUCK_01", ascRailX, truckRoadY, truckSpeed);
 
         // === 阶段3: ASC从集卡抓箱放到堆场 ===
         timeline.assign("ASC_01", "WI_ASC_DSCH")
@@ -428,7 +487,7 @@ public class SimTestController {
         resetDevicesToInitialState();
 
         // 集卡在ASC轨道下方
-        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX1);
+        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX);
 
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo("WI_ASC_DLVR");
@@ -443,7 +502,7 @@ public class SimTestController {
         Container container = new Container();
         container.setContainerId("CONT_DLVR");
         container.setCurrentPos("TRUCK_01");
-        container.setPosX(ascRailX1);  // ASC轨道X坐标
+        container.setPosX(ascRailX);  // ASC轨道X坐标
         container.setPosY(truckRoadY);  // 集卡道路Y坐标
         ctx.getContainerMap().put("CONT_DLVR", container);
 
@@ -466,7 +525,7 @@ public class SimTestController {
         resetDevicesToInitialState();
 
         // 设置初始位置
-        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX1);
+        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX);
         ctx.getQcMap().get("QC_01").setPosX(80.0);
 
         WorkInstruction wi = new WorkInstruction();
@@ -483,7 +542,7 @@ public class SimTestController {
         Container container = new Container();
         container.setContainerId("CONT_LOAD");
         container.setCurrentPos("YARD_A");
-        container.setPosX(ascRailX1);  // ASC轨道X坐标
+        container.setPosX(ascRailX);  // ASC轨道X坐标
         container.setPosY(truckRoadY);  // 集卡道路Y坐标
         ctx.getContainerMap().put("CONT_LOAD", container);
 
@@ -524,7 +583,7 @@ public class SimTestController {
         Container container = new Container();
         container.setContainerId("CONT_SHIFT");
         container.setCurrentPos("YARD_A");
-        container.setPosX(ascRailX1);
+        container.setPosX(ascRailX);
         container.setPosY(230.0);
         ctx.getContainerMap().put("CONT_SHIFT", container);
 
@@ -583,14 +642,14 @@ public class SimTestController {
         ctx.getWorkInstructionMap().put("WI_RECV", wi);
 
         // ASC 初始位置
-        ctx.getAscMap().get("ASC_01").setPosX(ascRailX1);
+        ctx.getAscMap().get("ASC_01").setPosX(ascRailX);
         ctx.getAscMap().get("ASC_01").setPosY(truckRoadY);
 
         TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
         timeline.wait(1000);
 
         // 集卡从大门开到 ASC 交接位
-        timeline.moveTruck("TRUCK_01", ascRailX1, truckRoadY, truckSpeed)
+        timeline.moveTruck("TRUCK_01", ascRailX, truckRoadY, truckSpeed)
                 .assign("ASC_01", "WI_RECV")
                 .fetch("ASC_01", fetchPutDuration)
                 .moveCrane("ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed)
@@ -601,7 +660,7 @@ public class SimTestController {
 
     /**
      * 直进 (DIRECT_IN) - 外集卡直接装船
-     * 外集卡从大门直接开到 QC 下方，QC 直接抓箱装船（不经过堆场）
+     * 外集卡从大门直接开到 QC 下方，QC直接抓箱装船（不经过堆场）
      */
     @PostMapping("/direct-in")
     public Result testDirectIn() {
@@ -748,7 +807,7 @@ public class SimTestController {
         ctx.getTruckMap().get("TRUCK_01").setPosY(truckRoadY);
 
         // ASC 初始在 X=175, Y=300 (堆场内部)
-        ctx.getAscMap().get("ASC_01").setPosX(ascRailX1);
+        ctx.getAscMap().get("ASC_01").setPosX(ascRailX);
         ctx.getAscMap().get("ASC_01").setPosY(300.0);
 
         TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);

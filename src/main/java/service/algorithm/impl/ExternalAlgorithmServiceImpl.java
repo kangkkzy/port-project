@@ -75,10 +75,12 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
                 ));
             }
 
-            //  构造事件负载
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("target", req.getTargetPoint());
-            payload.put("speed", req.getSpeed());
+            //  构造事件负载 - 使用 MoveCommandReq 对象
+            MoveCommandReq payload = new MoveCommandReq();
+            payload.setTruckId(req.getTruckId());
+            payload.setTargetPoint(req.getTargetPoint());
+            payload.setSpeed(req.getSpeed());
+            payload.setEnforcePathValidation(true);
 
             SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_MOVE, payload);
             event.addSubject("TRUCK", device.getId());
@@ -105,12 +107,8 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
                 throw new BusinessException("起重机移动指令错误: 必须明确指定距离 (distance)");
             }
 
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("req", req);
-            // 直接使用外部传入的速度
-            payload.put("speed", req.getSpeed());
-
-            SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_CRANE_MOVE, payload);
+            // 使用 CraneMoveReq 对象作为 payload
+            SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_CRANE_MOVE, req);
             event.addSubject("CRANE", req.getCraneId());
             return Result.success();
         }

@@ -29,6 +29,8 @@ public class MapDataServiceImpl implements MapDataService {
         // 启用 JSON 注释支持
         objectMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true);
         objectMapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_YAML_COMMENTS, true);
+        // 允许未知字段，避免新增配置字段导致加载失败
+        objectMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     // 内存缓存
@@ -126,6 +128,20 @@ public class MapDataServiceImpl implements MapDataService {
             return false;
         }
 
+        // 获取对应的容差值
+        double tolerance = 5.0;
+        try {
+            if ("TRUCK_ROAD".equals(targetPathType)) {
+                tolerance = getParameter("truckRoadTolerance");
+            } else if ("QC_RAIL".equals(targetPathType)) {
+                tolerance = getParameter("qcRailTolerance");
+            } else if ("ASC_RAIL".equals(targetPathType)) {
+                tolerance = getParameter("ascRailTolerance");
+            }
+        } catch (Exception e) {
+            // 使用默认值
+        }
+
         for (MapPathDto path : pathList) {
             if (!path.getPathType().equals(targetPathType)) {
                 continue;
@@ -134,12 +150,12 @@ public class MapDataServiceImpl implements MapDataService {
             // 验证坐标是否在路径范围内
             if ("HORIZONTAL".equals(path.getDirection())) {
                 // 水平路径：检查Y坐标是否在路径上，X坐标是否在起止范围内
-                if (Math.abs(y - path.getPosition()) < 5 && x >= path.getStartPoint() && x <= path.getEndPoint()) {
+                if (Math.abs(y - path.getPosition()) <= tolerance && x >= path.getStartPoint() && x <= path.getEndPoint()) {
                     return true;
                 }
             } else if ("VERTICAL".equals(path.getDirection())) {
                 // 垂直路径：检查X坐标是否在路径上，Y坐标是否在起止范围内
-                if (Math.abs(x - path.getPosition()) < 5 && y >= path.getStartPoint() && y <= path.getEndPoint()) {
+                if (Math.abs(x - path.getPosition()) <= tolerance && y >= path.getStartPoint() && y <= path.getEndPoint()) {
                     return true;
                 }
             }
@@ -304,7 +320,9 @@ public class MapDataServiceImpl implements MapDataService {
     @Override
     public MapPathDto getAscRailAtPosition(double x) {
         List<MapPathDto> ascRails = getAscRails();
-        if (ascRails.isEmpty()) return null;
+        if (ascRails.isEmpty()) {
+            return null;
+        }
 
         MapPathDto closest = null;
         double minDistance = Double.MAX_VALUE;
@@ -314,6 +332,17 @@ public class MapDataServiceImpl implements MapDataService {
                 minDistance = distance;
                 closest = rail;
             }
+        }
+
+        // 如果距离最近的轨道仍然超过容差，认为当前不在任何ASC轨道上
+        double tolerance;
+        try {
+            tolerance = getParameter("ascRailTolerance");
+        } catch (Exception e) {
+            tolerance = 3.0;
+        }
+        if (minDistance > tolerance) {
+            return null;
         }
         return closest;
     }

@@ -74,7 +74,12 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         }
 
         if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
-            // 水平移动：QC 只能在 QC 轨道上移动，ASC 只能在 ASC 轨道末端水平移动
+            // 水平移动：仅允许 QC 在其红色轨道上水平移动
+            if (deviceType == DeviceTypeEnum.ASC) {
+                // ASC 被严格限制在紫色虚线轨道上，仅允许沿轨道做垂直移动
+                throw new BusinessException(String.format("ASC [%s] 只能沿紫色轨道做垂直移动，禁止水平移动", craneId));
+            }
+
             targetPoint = new Point(posX + distance, posY);
 
             if (deviceType == DeviceTypeEnum.QC) {
@@ -97,15 +102,6 @@ public class CmdCraneMoveHandler implements SimEventHandler {
                                 craneId, targetX, qcRail.getStartPoint(), qcRail.getEndPoint());
                         throw new BusinessException(String.format("QC [%s] 移动目标超出轨道范围", craneId));
                     }
-                }
-            } else if (deviceType == DeviceTypeEnum.ASC) {
-                // ASC 水平移动时，需要在 ASC 轨道末端水平移动
-                // 校验当前 ASC 在某个 ASC 轨道上
-                MapPathDto ascRail = mapDataService.getAscRailAtPosition(posX);
-                if (ascRail == null) {
-                    log.error("严重错误: ASC [{}] 不在任何 ASC 轨道上 (X={})，触发熔断暂停",
-                            craneId, posX);
-                    throw new BusinessException(String.format("ASC [%s] 不在任何 ASC 轨道上", craneId));
                 }
             }
         } else if (DeviceStateEnum.MOVE_VERTICAL.equals(req.getMoveType())) {
