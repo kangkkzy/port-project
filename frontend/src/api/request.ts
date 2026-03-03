@@ -12,7 +12,9 @@ service.interceptors.response.use(
         const res = response.data;
         // 根据你后端的 Result 对象，code 为 200 代表成功
         if (res.code === 200) {
-            return res.data; // 成功就把具体数据剥离出来
+            // 返回完整响应，保留 msg 字段供调用方使用
+            // 调用方可通过 .msg 获取成功提示，通过 .data 获取业务数据
+            return res;
         } else {
             console.error('API 报错啦:', res.msg);
             return Promise.reject(new Error(res.msg || 'Error'));
