@@ -5,7 +5,6 @@ import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
-import common.util.GisUtil;
 import engine.SimulationEngine;
 import engine.SimEvent;
 import engine.context.GlobalContext;
@@ -29,19 +28,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 仿真测试场景接口 - 用于演示和调试
+ * 仿真测试场景接口 - 使用 TimelineBuilder 链式构建安全时间轴
  *
- * 业务流程测试场景
- *
- * 关键规则（符合DES架构）：
- * 1. TRUCK只能在TRUCK_ROAD上移动 (Y=200, Y=550)
- * 2. ASC只能在ASC_RAIL垂直轨道上移动 (X=175, 425, 675)
- * 3. QC只能在QC_RAIL水平轨道上移动 (Y=140)
- * 4. 设备执行FETCH_DONE/PUT_DONE前必须先完成移动，状态为IDLE
- * 5. 每个FETCH_DONE/PUT_DONE之前必须先通过CMD_ASSIGN_TASK绑定作业指令
- * 6. 设备与集卡支持跨距作业：
- *    - QC与集卡：Y方向允许60米偏移 (QC轨道140 vs 集卡道路200)
- *    - ASC与集卡：X方向需要接近轨道位置
+ * 核心设计：虚拟坐标沙盘
+ * - 在 TimelineBuilder 内部维护虚拟坐标，用于计算时间轴
+ * - 不修改 GlobalContext 中的真实坐标（由引擎在事件执行时更新）
+ * - 避免"过早坐标变异"导致的物理校验失败
  */
 @RestController
 @RequestMapping("/sim/test")
@@ -51,23 +43,206 @@ public class SimTestController {
 
     // 地图配置参数
     private double truckSpeed = 5.0;
-    private double qcSpeed = 0.8;
-    private double ascSpeed = 0.5;
-    private double qcRailY = 140.0;
-    private double truckRoadY1 = 200.0;
-    private double truckRoadY2 = 550.0;
+    private double qcSpeed = 10.0;
+    private double ascSpeed = 8.0;
+    private double qcRailY = 140.0;        // QC轨道Y坐标
+    private double truckRoadY = 200.0;      // 集卡道路Y坐标
     private double ascRailX1 = 175.0;
     private double ascRailX2 = 425.0;
     private double ascRailX3 = 675.0;
+
+    // 操作耗时配置
+    private int fetchPutDuration = 3000;    // 抓放箱操作耗时(ms)
+    private int assignDuration = 500;       // 指派任务耗时(ms)
+    private int safetyGap = 100;           // 安全时间间隔(ms)
+
+    // QC物理约束：Y轴基础距离60米，X轴最大移动25米（保证直线距离≤65米）
+    // √(60² + 25²) = √(3600 + 625) = √4225 = 65米（刚好满足）
+    private double qcMaxHorizontalMove = 20.0;  // QC横向移动距离（保守值）
 
     public SimTestController(SimulationEngine engine) {
         this.engine = engine;
     }
 
     /**
-     * 自动初始化测试环境
-     * 如果 GlobalContext 中没有设备，自动创建 Mock 数据
+     * 时间轴构建器 - 链式构建安全的操作序列
+     *
+     * 核心设计：虚拟坐标沙盘
+     * - 仅在虚拟坐标 Map 中推演设备未来位置
+     * - 不修改 GlobalContext 中的真实设备坐标
+     * - 避免物理校验器看到"未来坐标"导致误判
      */
+    private class TimelineBuilder {
+        private long currentTime;
+        private final GlobalContext ctx;
+
+        // 虚拟坐标沙盘 - 仅用于时间推演，不影响真实引擎
+        private final Map<String, Point> virtualTruckPos = new HashMap<>();
+        private final Map<String, Point> virtualCranePos = new HashMap<>();
+
+        public TimelineBuilder(long startTime, GlobalContext ctx) {
+            this.currentTime = startTime;
+            this.ctx = ctx;
+
+            // 初始化虚拟坐标为当前真实坐标
+            initVirtualPositions();
+        }
+
+        /**
+         * 初始化虚拟坐标为当前真实坐标
+         */
+        private void initVirtualPositions() {
+            // 集卡
+            for (Truck truck : ctx.getTruckMap().values()) {
+                virtualTruckPos.put(truck.getId(), new Point(truck.getPosX(), truck.getPosY()));
+            }
+            // QC
+            for (QcDevice qc : ctx.getQcMap().values()) {
+                virtualCranePos.put(qc.getId(), new Point(qc.getPosX(), qc.getPosY()));
+            }
+            // ASC
+            for (AscDevice asc : ctx.getAscMap().values()) {
+                virtualCranePos.put(asc.getId(), new Point(asc.getPosX(), asc.getPosY()));
+            }
+        }
+
+        // ==================== 基础时间控制 ====================
+
+        /**
+         * 等待指定时间
+         */
+        public TimelineBuilder wait(int ms) {
+            this.currentTime += ms;
+            return this;
+        }
+
+        // ==================== 设备操作指令 ====================
+
+        /**
+         * 调度指派任务指令（耗时 + 安全间隔）
+         */
+        public TimelineBuilder assign(String deviceId, String wiRefNo) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("wiRefNo", wiRefNo);
+            engine.scheduleEvent(null, currentTime, EventTypeEnum.CMD_ASSIGN_TASK, payload)
+                    .addSubject("DEVICE", deviceId);
+
+            this.currentTime += assignDuration + safetyGap;
+            return this;
+        }
+
+        /**
+         * 调度集卡移动指令
+         * - 从虚拟坐标计算距离和时间
+         * - 在虚拟坐标中更新位置
+         * - 不修改真实 GlobalContext 坐标
+         */
+        public TimelineBuilder moveTruck(String truckId, double targetX, double targetY, double speed) {
+            // 从虚拟坐标获取起点
+            Point startPos = virtualTruckPos.get(truckId);
+            if (startPos == null) {
+                startPos = new Point(0.0, truckRoadY);
+                virtualTruckPos.put(truckId, startPos);
+            }
+
+            // 计算距离和耗时（基于虚拟坐标）
+            double distance = Math.hypot(targetX - startPos.getX(), targetY - startPos.getY());
+            long moveTimeMs = (long) ((distance / speed) * 1000);
+
+            // 调度移动指令（在currentTime时刻）
+            MoveCommandReq payload = new MoveCommandReq();
+            payload.setTruckId(truckId);
+            payload.setTargetPoint(new Point(targetX, targetY));
+            payload.setSpeed(speed);
+            payload.setEnforcePathValidation(true);
+            engine.scheduleEvent(null, currentTime, EventTypeEnum.CMD_MOVE, payload)
+                    .addSubject("TRUCK", truckId);
+
+            // 更新虚拟坐标（供后续操作计算距离使用）- 不触碰真实坐标！
+            virtualTruckPos.put(truckId, new Point(targetX, targetY));
+
+            // 自动推进时间
+            this.currentTime += moveTimeMs + safetyGap;
+            return this;
+        }
+
+        /**
+         * 调度吊机移动指令
+         * - 基于虚拟坐标计算距离和时间
+         * - 更新虚拟坐标
+         */
+        public TimelineBuilder moveCrane(String craneId, String moveType, double distance, double speed) {
+            // 从虚拟坐标获取起点
+            Point startPos = virtualCranePos.get(craneId);
+            if (startPos == null) {
+                startPos = new Point(0.0, qcRailY);
+                virtualCranePos.put(craneId, startPos);
+            }
+
+            // 计算移动耗时
+            long moveTimeMs = (long) ((Math.abs(distance) / speed) * 1000);
+
+            // 调度移动指令
+            CraneMoveReq payload = new CraneMoveReq();
+            payload.setCraneId(craneId);
+            payload.setMoveType(DeviceStateEnum.valueOf(moveType));
+            payload.setDistance(distance);
+            payload.setSpeed(speed);
+            engine.scheduleEvent(null, currentTime, EventTypeEnum.CMD_CRANE_MOVE, payload)
+                    .addSubject("CRANE", craneId);
+
+            // 更新虚拟坐标（不触碰真实GlobalContext！）
+            double newX = startPos.getX();
+            double newY = startPos.getY();
+            if ("MOVE_HORIZONTAL".equals(moveType)) {
+                newX += distance;
+            } else if ("MOVE_VERTICAL".equals(moveType)) {
+                newY += distance;
+            }
+            virtualCranePos.put(craneId, new Point(newX, newY));
+
+            // 自动推进时间
+            this.currentTime += moveTimeMs + safetyGap;
+            return this;
+        }
+
+        /**
+         * 调度抓箱操作
+         */
+        public TimelineBuilder fetch(String craneId, int durationMs) {
+            CraneOperationReq payload = new CraneOperationReq();
+            payload.setCraneId(craneId);
+            payload.setAction(EventTypeEnum.FETCH_DONE);
+            payload.setDurationMS(durationMs);
+            engine.scheduleEvent(null, currentTime, EventTypeEnum.CMD_CRANE_OP, payload)
+                    .addSubject("CRANE", craneId);
+
+            this.currentTime += durationMs + safetyGap;
+            return this;
+        }
+
+        /**
+         * 调度放箱操作
+         */
+        public TimelineBuilder put(String craneId, int durationMs) {
+            CraneOperationReq payload = new CraneOperationReq();
+            payload.setCraneId(craneId);
+            payload.setAction(EventTypeEnum.PUT_DONE);
+            payload.setDurationMS(durationMs);
+            engine.scheduleEvent(null, currentTime, EventTypeEnum.CMD_CRANE_OP, payload)
+                    .addSubject("CRANE", craneId);
+
+            this.currentTime += durationMs + safetyGap;
+            return this;
+        }
+
+        public long build() {
+            return currentTime;
+        }
+    }
+
+    // ==================== 环境初始化 ====================
+
     private void ensureTestEnvironment() {
         GlobalContext ctx = GlobalContext.getInstance();
 
@@ -78,7 +253,7 @@ public class SimTestController {
             truck.setId("TRUCK_01");
             truck.setType(DeviceTypeEnum.ELECTRIC_TRUCK);
             truck.setPosX(0.0);
-            truck.setPosY(truckRoadY1);
+            truck.setPosY(truckRoadY);
             truck.setState(DeviceStateEnum.IDLE);
             truck.setSpeed(truckSpeed);
             truck.setPowerLevel(100.0);
@@ -86,43 +261,40 @@ public class SimTestController {
             ctx.getTruckMap().put("TRUCK_01", truck);
         }
 
-        // 初始化QC
+        // 初始化QC (posY = qcRailY = 140)
         QcDevice qc = ctx.getQcMap().get("QC_01");
         if (qc == null) {
             qc = new QcDevice();
             qc.setId("QC_01");
             qc.setType(DeviceTypeEnum.QC);
             qc.setPosX(0.0);
-            qc.setPosY(0.0);  // QC posY固定为0，实际位置由posX决定
+            qc.setPosY(qcRailY);
             qc.setState(DeviceStateEnum.IDLE);
             qc.setSpeed(qcSpeed);
             ctx.getQcMap().put("QC_01", qc);
         }
 
-        // 初始化ASC
+        // 初始化ASC (posY = truckRoadY = 200，与集卡同一水平线)
         AscDevice asc = ctx.getAscMap().get("ASC_01");
         if (asc == null) {
             asc = new AscDevice();
             asc.setId("ASC_01");
             asc.setType(DeviceTypeEnum.ASC);
             asc.setPosX(ascRailX1);
-            asc.setPosY(0.0);  // ASC posY固定为0，实际位置由posX决定
+            asc.setPosY(truckRoadY);  // ASC在Y=200与集卡交接
             asc.setState(DeviceStateEnum.IDLE);
             asc.setSpeed(ascSpeed);
             ctx.getAscMap().put("ASC_01", asc);
         }
     }
 
-    /**
-     * 重置设备到初始状态（不删除设备，只重置位置和状态）
-     */
     private void resetDevicesToInitialState() {
         GlobalContext ctx = GlobalContext.getInstance();
 
         Truck truck = ctx.getTruckMap().get("TRUCK_01");
         if (truck != null) {
             truck.setPosX(0.0);
-            truck.setPosY(truckRoadY1);
+            truck.setPosY(truckRoadY);
             truck.setState(DeviceStateEnum.IDLE);
             truck.setCurrWiRefNo(null);
             truck.setCurrentTargetPos(null);
@@ -132,7 +304,7 @@ public class SimTestController {
         QcDevice qc = ctx.getQcMap().get("QC_01");
         if (qc != null) {
             qc.setPosX(0.0);
-            qc.setPosY(0.0);
+            qc.setPosY(qcRailY);
             qc.setState(DeviceStateEnum.IDLE);
             qc.setCurrWiRefNo(null);
             qc.setCurrentTargetPos(null);
@@ -141,51 +313,23 @@ public class SimTestController {
         AscDevice asc = ctx.getAscMap().get("ASC_01");
         if (asc != null) {
             asc.setPosX(ascRailX1);
-            asc.setPosY(0.0);
+            asc.setPosY(truckRoadY);  // ASC在Y=200与集卡交接
             asc.setState(DeviceStateEnum.IDLE);
             asc.setCurrWiRefNo(null);
             asc.setCurrentTargetPos(null);
         }
     }
 
-    /**
-     * 动态计算移动耗时（毫秒）- 使用绝对值避免负数时间
-     */
-    private long calculateMoveTime(double distance, double speed) {
-        // 使用 Math.abs 确保时间永远为正数
-        return (long) ((Math.abs(distance) / speed) * 1000);
-    }
+    // ==================== 测试接口实现 ====================
 
-    /**
-     * 执行集卡完整业务流程测试 (DSCH卸船)
-     * 场景：集卡到达 -> QC装货 -> 集卡移动 -> ASC卸货
-     *
-     * 物理流程：
-     * 1. 集卡从道路移动到QC下方 (Y=200 -> QC轨道X对应位置)
-     * 2. QC从船上抓箱放到集卡 (QC在Y=140轨道X移动，集卡在Y=200车道)
-     * 3. 集卡从QC下方移动到ASC下方
-     * 4. ASC从集卡抓箱放到堆场 (ASC在X轨道移动，集卡在Y=200车道)
-     *
-     * DES架构说明：
-     * - 外部算法（测试脚本）负责生成符合路网的轨迹点
-     * - 集卡必须在TRUCK_ROAD (Y=200) 上行驶
-     * - QC与集卡跨距作业：Y方向偏移60米 (140 -> 200)
-     */
     @PostMapping("/truck-delivery")
     public Result testTruckDelivery() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 自动初始化测试环境（如果设备不存在则创建）
         ensureTestEnvironment();
-
-        // 重置设备到初始状态
         resetDevicesToInitialState();
 
-        Truck truck = ctx.getTruckMap().get("TRUCK_01");
-        QcDevice qc = ctx.getQcMap().get("QC_01");
-        AscDevice asc = ctx.getAscMap().get("ASC_01");
-
-        // 2. 创建作业指令 (DSCH流程)
+        // 创建作业指令
         WorkInstruction wiQc = new WorkInstruction();
         wiQc.setWiRefNo("WI_QC_DSCH");
         wiQc.setContainerId("CONT_DSCH");
@@ -206,96 +350,48 @@ public class SimTestController {
         wiAsc.setToPos("YARD_B");
         ctx.getWorkInstructionMap().put("WI_ASC_DSCH", wiAsc);
 
-        // 3. 创建集装箱
         Container container = new Container();
         container.setContainerId("CONT_DSCH");
         container.setCurrentPos("VESSEL_01");
+        container.setPosX(0.0);    // 船边位置
+        container.setPosY(170.0);    // 船边与集卡之间
         ctx.getContainerMap().put("CONT_DSCH", container);
 
-        long baseTime = ctx.getSimTime();
-        long currentTime = baseTime;
+        // 使用 TimelineBuilder（传入 ctx 用于初始化虚拟坐标）
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
 
-        // ======== 事件链 (动态时间计算) ========
+        timeline.wait(1000);
 
-        // === 阶段1: 集卡移动到QC下方 ===
-        // 集卡从(0,200)移动到(0,200)（已在目标位置）
-        currentTime = currentTime + 1000;
-        currentTime = createMoveEventDynamic(currentTime, "TRUCK_01", 0.0, truckRoadY1, truckSpeed);
+        // === 阶段1: QC装货到集卡 ===
+        timeline.assign("QC_01", "WI_QC_DSCH")
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", -20.0, qcSpeed)
+                .fetch("QC_01", fetchPutDuration)
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", 20.0, qcSpeed)
+                .put("QC_01", fetchPutDuration);
 
-        // === 阶段2: QC装货到集卡 ===
+        // === 阶段2: 集卡移动到ASC下方 ===
+        timeline.moveTruck("TRUCK_01", ascRailX1, truckRoadY, truckSpeed);
 
-        // 1. 指派任务给QC
-        currentTime = currentTime + 500;
-        createAssignTaskEvent(currentTime, "QC_01", "WI_QC_DSCH");
+        // === 阶段3: ASC从集卡抓箱放到堆场 ===
+        timeline.assign("ASC_01", "WI_ASC_DSCH")
+                .fetch("ASC_01", fetchPutDuration)
+                .moveCrane("ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed)
+                .put("ASC_01", fetchPutDuration);
 
-        // 2. QC从船上抓箱 - QC先移动到船边（向左移动，X: 0 -> -30）
-        currentTime = currentTime + 500;
-        currentTime = createCraneMoveEventDynamic(currentTime, "QC_01", "MOVE_HORIZONTAL", -30.0, qcSpeed);
-
-        // 3. QC抓箱 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "QC_01", "FETCH_DONE", 3000);
-
-        // 4. QC移动回集卡上方 - 从X=-30回到X=0（向右移动）
-        currentTime = currentTime + 500;
-        currentTime = createCraneMoveEventDynamic(currentTime, "QC_01", "MOVE_HORIZONTAL", 30.0, qcSpeed);
-
-        // 5. QC放箱到集卡 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "QC_01", "PUT_DONE", 3000);
-
-        // === 阶段3: 集卡移动到ASC下方 ===
-        currentTime = currentTime + 2000;
-        currentTime = createMoveEventDynamic(currentTime, "TRUCK_01", ascRailX1, truckRoadY1, truckSpeed);
-
-        // === 阶段4: ASC从集卡抓箱 ===
-
-        // 1. 指派任务给ASC
-        currentTime = currentTime + 500;
-        createAssignTaskEvent(currentTime, "ASC_01", "WI_ASC_DSCH");
-
-        // 2. ASC从集卡抓箱 (操作耗时)
-        currentTime = currentTime + 500;
-        createCraneOperateEvent(currentTime, "ASC_01", "FETCH_DONE", 3000);
-
-        // 3. ASC移动到堆场（Y方向移动）
-        currentTime = currentTime + 500;
-        currentTime = createCraneMoveEventDynamic(currentTime, "ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed);
-
-        // 4. ASC放箱到堆场 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "ASC_01", "PUT_DONE", 3000);
-
-        return Result.success("已调度集卡完整业务流程测试(DSCH) - 自动初始化设备");
+        return Result.success("已调度集卡完整业务流程测试(DSCH)");
     }
 
-    /**
-     * 执行桥吊QC装船业务流程测试 (LOAD)
-     * 场景：集卡到达 -> QC从集卡抓箱放到船上
-     *
-     * 物理流程：
-     * 1. 集卡在TRUCK_ROAD (Y=200) 等待
-     * 2. QC从集卡抓箱 (跨距作业，Y方向偏移60米)
-     * 3. QC移动到船边放箱
-     */
     @PostMapping("/qc-loading")
     public Result testQcLoading() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 自动初始化测试环境
         ensureTestEnvironment();
         resetDevicesToInitialState();
 
-        QcDevice qc = ctx.getQcMap().get("QC_01");
-        Truck truck = ctx.getTruckMap().get("TRUCK_01");
+        // 设置初始位置
+        ctx.getQcMap().get("QC_01").setPosX(50.0);
+        ctx.getTruckMap().get("TRUCK_01").setPosX(50.0);
 
-        // 设置QC初始位置
-        qc.setPosX(50.0);
-
-        // 设置集卡初始位置
-        truck.setPosX(50.0);
-
-        // 创建作业指令
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo("WI_QC_LOAD");
         wi.setContainerId("CONT_LOAD");
@@ -306,58 +402,34 @@ public class SimTestController {
         wi.setToPos("VESSEL_01");
         ctx.getWorkInstructionMap().put("WI_QC_LOAD", wi);
 
-        // 创建集装箱
         Container container = new Container();
         container.setContainerId("CONT_LOAD");
         container.setCurrentPos("TRUCK_01");
+        container.setPosX(50.0);   // 集卡当前X坐标
+        container.setPosY(truckRoadY);  // 集卡道路Y坐标
         ctx.getContainerMap().put("CONT_LOAD", container);
 
-        long baseTime = ctx.getSimTime();
-        long currentTime = baseTime;
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
 
-        // 1. 指派任务给QC
-        currentTime = currentTime + 1000;
-        createAssignTaskEvent(currentTime, "QC_01", "WI_QC_LOAD");
+        timeline.assign("QC_01", "WI_QC_LOAD")
+                .fetch("QC_01", fetchPutDuration)
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", -20.0, qcSpeed)
+                .put("QC_01", fetchPutDuration);
 
-        // 2. QC从集卡抓箱 (操作耗时)
-        currentTime = currentTime + 500;
-        createCraneOperateEvent(currentTime, "QC_01", "FETCH_DONE", 3000);
-
-        // 3. QC移动到船边 - 从X=50移动到X=20(船边)，向左移动使用负数距离
-        currentTime = currentTime + 3000;
-        currentTime = createCraneMoveEventDynamic(currentTime, "QC_01", "MOVE_HORIZONTAL", -30.0, qcSpeed);
-
-        // 4. QC放箱到船上 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "QC_01", "PUT_DONE", 3000);
-
-        return Result.success("已调度QC装船业务流程测试(LOAD) - 自动初始化设备");
+        return Result.success("已调度QC装船业务流程测试(LOAD)");
     }
 
-    /**
-     * 执行龙门吊ASC卸箱业务流程测试 (DLVR)
-     * 场景：集卡到达 -> ASC从集卡抓箱放到堆场
-     *
-     * 物理流程：
-     * 1. 集卡在TRUCK_ROAD (Y=200) 移动到ASC轨道X位置
-     * 2. ASC从集卡抓箱 (跨距作业，X方向接近轨道)
-     * 3. ASC移动到堆场放箱
-     */
     @PostMapping("/asc-unloading")
     public Result testAscUnloading() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 自动初始化测试环境
         ensureTestEnvironment();
         resetDevicesToInitialState();
 
-        AscDevice asc = ctx.getAscMap().get("ASC_01");
-        Truck truck = ctx.getTruckMap().get("TRUCK_01");
+        // 集卡在ASC轨道下方
+        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX1);
 
-        // 设置集卡初始位置（在ASC轨道下方）
-        truck.setPosX(ascRailX1);
-
-        // 创建作业指令
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo("WI_ASC_DLVR");
         wi.setContainerId("CONT_DLVR");
@@ -368,65 +440,35 @@ public class SimTestController {
         wi.setToPos("YARD_B");
         ctx.getWorkInstructionMap().put("WI_ASC_DLVR", wi);
 
-        // 创建集装箱
         Container container = new Container();
         container.setContainerId("CONT_DLVR");
         container.setCurrentPos("TRUCK_01");
+        container.setPosX(ascRailX1);  // ASC轨道X坐标
+        container.setPosY(truckRoadY);  // 集卡道路Y坐标
         ctx.getContainerMap().put("CONT_DLVR", container);
 
-        long baseTime = ctx.getSimTime();
-        long currentTime = baseTime;
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
 
-        // 1. 指派任务给ASC
-        currentTime = currentTime + 1000;
-        createAssignTaskEvent(currentTime, "ASC_01", "WI_ASC_DLVR");
+        timeline.assign("ASC_01", "WI_ASC_DLVR")
+                .fetch("ASC_01", fetchPutDuration)
+                .moveCrane("ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed)
+                .put("ASC_01", fetchPutDuration);
 
-        // 2. ASC从集卡抓箱 (操作耗时)
-        currentTime = currentTime + 500;
-        createCraneOperateEvent(currentTime, "ASC_01", "FETCH_DONE", 3000);
-
-        // 3. ASC移动到堆场 - 从Y=0移动到Y=30(堆场)，正向移动
-        currentTime = currentTime + 3000;
-        currentTime = createCraneMoveEventDynamic(currentTime, "ASC_01", "MOVE_VERTICAL", 30.0, ascSpeed);
-
-        // 4. ASC放箱到堆场 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "ASC_01", "PUT_DONE", 3000);
-
-        return Result.success("已调度ASC卸箱业务流程测试(DLVR) - 自动初始化设备");
+        return Result.success("已调度ASC卸箱业务流程测试(DLVR)");
     }
 
-    /**
-     * 执行完整装船流程测试 (LOAD)
-     * 场景：ASC装货 -> 集卡移动 -> QC装船
-     *
-     * 物理流程：
-     * 1. ASC在X=175轨道，集卡在Y=200道路
-     * 2. ASC抓箱放到集卡 (跨距作业)
-     * 3. 集卡移动到QC下方 (Y=200道路)
-     * 4. QC从集卡抓箱 (跨距作业)
-     * 5. QC移动到船边放箱
-     */
     @PostMapping("/full-loading")
     public Result testFullLoading() {
         GlobalContext ctx = GlobalContext.getInstance();
 
-        // 自动初始化测试环境
         ensureTestEnvironment();
         resetDevicesToInitialState();
 
-        AscDevice asc = ctx.getAscMap().get("ASC_01");
-        QcDevice qc = ctx.getQcMap().get("QC_01");
-        Truck truck = ctx.getTruckMap().get("TRUCK_01");
+        // 设置初始位置
+        ctx.getTruckMap().get("TRUCK_01").setPosX(ascRailX1);
+        ctx.getQcMap().get("QC_01").setPosX(80.0);
 
-        // 设置设备初始位置
-        // ASC在X=175轨道，集卡在Y=200道路
-        truck.setPosX(ascRailX1);
-
-        // QC在X=80
-        qc.setPosX(80.0);
-
-        // 创建作业指令
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo("WI_LOAD_FULL");
         wi.setContainerId("CONT_LOAD");
@@ -438,264 +480,30 @@ public class SimTestController {
         wi.setToPos("VESSEL_01");
         ctx.getWorkInstructionMap().put("WI_LOAD_FULL", wi);
 
-        // 创建集装箱
         Container container = new Container();
         container.setContainerId("CONT_LOAD");
         container.setCurrentPos("YARD_A");
+        container.setPosX(ascRailX1);  // ASC轨道X坐标
+        container.setPosY(truckRoadY);  // 集卡道路Y坐标
         ctx.getContainerMap().put("CONT_LOAD", container);
 
-        long baseTime = ctx.getSimTime();
-        long currentTime = baseTime;
+        TimelineBuilder timeline = new TimelineBuilder(ctx.getSimTime(), ctx);
+        timeline.wait(1000);
 
         // === 阶段1: ASC装货到集卡 ===
-
-        // 1. 指派任务给ASC
-        currentTime = currentTime + 1000;
-        createAssignTaskEvent(currentTime, "ASC_01", "WI_LOAD_FULL");
-
-        // 2. ASC从堆场抓箱 (操作耗时)
-        currentTime = currentTime + 500;
-        createCraneOperateEvent(currentTime, "ASC_01", "FETCH_DONE", 3000);
-
-        // 3. ASC放箱到集卡 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "ASC_01", "PUT_DONE", 3000);
+        timeline.assign("ASC_01", "WI_LOAD_FULL")
+                .fetch("ASC_01", fetchPutDuration)
+                .put("ASC_01", fetchPutDuration);
 
         // === 阶段2: 集卡移动到QC ===
-
-        // 集卡从(175,200)移动到(80,200)，在Y=200道路上
-        currentTime = currentTime + 2000;
-        currentTime = createMoveEventDynamic(currentTime, "TRUCK_01", 80.0, truckRoadY1, truckSpeed);
+        timeline.moveTruck("TRUCK_01", 80.0, truckRoadY, truckSpeed);
 
         // === 阶段3: QC装船 ===
+        timeline.assign("QC_01", "WI_LOAD_FULL")
+                .fetch("QC_01", fetchPutDuration)
+                .moveCrane("QC_01", "MOVE_HORIZONTAL", -20.0, qcSpeed)
+                .put("QC_01", fetchPutDuration);
 
-        // 1. 指派任务给QC
-        currentTime = currentTime + 500;
-        createAssignTaskEvent(currentTime, "QC_01", "WI_LOAD_FULL");
-
-        // 2. QC从集卡抓箱 (操作耗时)
-        currentTime = currentTime + 500;
-        createCraneOperateEvent(currentTime, "QC_01", "FETCH_DONE", 3000);
-
-        // 3. QC移动到船边 - 从X=80移动到X=30(船边)，向左移动使用负数
-        currentTime = currentTime + 3000;
-        currentTime = createCraneMoveEventDynamic(currentTime, "QC_01", "MOVE_HORIZONTAL", -50.0, qcSpeed);
-
-        // 4. QC放箱到船上 (操作耗时)
-        currentTime = currentTime + 3000;
-        createCraneOperateEvent(currentTime, "QC_01", "PUT_DONE", 3000);
-
-        return Result.success("已调度完整装船业务流程测试(LOAD) - 自动初始化设备");
-    }
-
-    // ==================== 辅助方法 ====================
-
-    /**
-     * 创建集卡移动事件 (简化模式 - 引擎自动计算关键点)
-     * TRUCK只能在TRUCK_ROAD上移动 (Y=200 或 Y=550)
-     * 动态计算耗时：基于设备当前位置和目标位置计算实际移动时间
-     *
-     * @param baseTime 基准时间（通常为当前仿真时间）
-     * @param truckId 集卡ID
-     * @param targetX 目标X坐标
-     * @param targetY 目标Y坐标
-     * @param speed 移动速度
-     * @return 返回事件触发时间，供后续事件链使用
-     */
-    private long createMoveEventDynamic(long baseTime, String truckId, double targetX, double targetY, double speed) {
-        GlobalContext ctx = GlobalContext.getInstance();
-        Truck truck = ctx.getTruckMap().get(truckId);
-        if (truck == null) {
-            return baseTime;
-        }
-
-        // 动态计算移动耗时（使用绝对值确保时间为正数）
-        double distance = GisUtil.getDistance(
-                new Point(truck.getPosX(), truck.getPosY()),
-                new Point(targetX, targetY)
-        );
-        long moveTime = (long) ((Math.abs(distance) / speed) * 1000);
-        long triggerTime = baseTime + moveTime;
-
-        MoveCommandReq payload = new MoveCommandReq();
-        payload.setTruckId(truckId);
-        payload.setTargetPoint(new Point(targetX, targetY));
-        payload.setSpeed(speed);
-        payload.setEnforcePathValidation(true);
-
-        SimEvent event = engine.scheduleEvent(null, triggerTime, EventTypeEnum.CMD_MOVE, payload);
-        event.addSubject("TRUCK", truckId);
-
-        // 更新集卡位置（用于下次计算）
-        truck.setPosX(targetX);
-        truck.setPosY(targetY);
-
-        return triggerTime;
-    }
-
-    /**
-     * 创建集卡移动事件 (带初始偏移的动态模式)
-     * 第一个事件使用固定偏移，后续事件动态计算
-     *
-     * @param baseTime 基准时间
-     * @param offsetMs 初始偏移（毫秒）
-     * @param truckId 集卡ID
-     * @param targetX 目标X坐标
-     * @param targetY 目标Y坐标
-     * @param speed 移动速度
-     * @return 返回实际触发时间
-     */
-    private long createMoveEventWithOffset(long baseTime, long offsetMs, String truckId, double targetX, double targetY, double speed) {
-        GlobalContext ctx = GlobalContext.getInstance();
-        Truck truck = ctx.getTruckMap().get(truckId);
-        if (truck == null) {
-            return baseTime + offsetMs;
-        }
-
-        // 动态计算移动耗时（使用绝对值确保时间为正数）
-        double distance = GisUtil.getDistance(
-                new Point(truck.getPosX(), truck.getPosY()),
-                new Point(targetX, targetY)
-        );
-        long moveTime = (long) ((Math.abs(distance) / speed) * 1000);
-        long triggerTime = baseTime + offsetMs + moveTime;
-
-        MoveCommandReq payload = new MoveCommandReq();
-        payload.setTruckId(truckId);
-        payload.setTargetPoint(new Point(targetX, targetY));
-        payload.setSpeed(speed);
-        payload.setEnforcePathValidation(true);
-
-        SimEvent event = engine.scheduleEvent(null, triggerTime, EventTypeEnum.CMD_MOVE, payload);
-        event.addSubject("TRUCK", truckId);
-
-        // 更新集卡位置（用于下次计算）
-        truck.setPosX(targetX);
-        truck.setPosY(targetY);
-
-        return triggerTime;
-    }
-
-    /**
-     * 创建集卡移动事件 (精确模式 - 外部算法提供轨迹点)
-     * 轨迹点必须位于合法的TRUCK_ROAD上
-     *
-     * @param time 触发时间
-     * @param truckId 集卡ID
-     * @param targetX 目标X坐标
-     * @param targetY 目标Y坐标
-     * @param speed 移动速度
-     * @param pathPoints 轨迹点列表（可null表示使用简化模式）
-     */
-    private SimEvent createMoveEventWithPath(long time, String truckId, double targetX, double targetY, double speed, java.util.List<Point> pathPoints) {
-        MoveCommandReq payload = new MoveCommandReq();
-        payload.setTruckId(truckId);
-        payload.setTargetPoint(new Point(targetX, targetY));
-        payload.setSpeed(speed);
-        payload.setPathPoints(pathPoints);
-        payload.setEnforcePathValidation(true);
-
-        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_MOVE, payload);
-        event.addSubject("TRUCK", truckId);
-
-        if (pathPoints != null && !pathPoints.isEmpty()) {
-            System.out.println("[移动指令] 集卡 " + truckId + " 轨迹点数: " + pathPoints.size());
-        }
-
-        return event;
-    }
-
-    /**
-     * 创建吊机移动事件 - 动态耗时计算
-     * ASC只能在垂直方向(MOVE_VERTICAL)移动
-     * QC只能在水平方向(MOVE_HORIZONTAL)移动
-     *
-     * 关键：distance 保留符号表示方向，但计算时间时使用绝对值避免负数时间
-     *
-     * @param baseTime 基准时间
-     * @param craneId 吊机ID
-     * @param moveType 移动类型 (MOVE_HORIZONTAL/MOVE_VERTICAL)
-     * @param distance 移动距离（负数表示反向移动）
-     * @param speed 移动速度
-     * @return 返回实际触发时间
-     */
-    private long createCraneMoveEventDynamic(long baseTime, String craneId, String moveType, double distance, double speed) {
-        // 关键修复：使用 Math.abs() 确保时间为正数，同时保留 distance 符号用于方向计算
-        long moveTime = (long) ((Math.abs(distance) / speed) * 1000);
-        long triggerTime = baseTime + moveTime;
-
-        CraneMoveReq payload = new CraneMoveReq();
-        payload.setCraneId(craneId);
-        payload.setMoveType(DeviceStateEnum.valueOf(moveType));
-        payload.setDistance(distance);  // 保留符号，handler会根据此计算目标位置
-        payload.setSpeed(speed);
-
-        SimEvent event = engine.scheduleEvent(null, triggerTime, EventTypeEnum.CMD_CRANE_MOVE, payload);
-        event.addSubject("CRANE", craneId);
-
-        // 更新设备位置供下次计算使用
-        updateCranePosition(craneId, moveType, distance);
-
-        return triggerTime;
-    }
-
-    /**
-     * 更新吊机位置（用于下次移动计算）
-     */
-    private void updateCranePosition(String craneId, String moveType, double distance) {
-        GlobalContext ctx = GlobalContext.getInstance();
-        BaseDevice device = ctx.getDevice(craneId);
-        if (device == null) return;
-
-        if ("MOVE_HORIZONTAL".equals(moveType)) {
-            device.setPosX(device.getPosX() + distance);
-        } else if ("MOVE_VERTICAL".equals(moveType)) {
-            device.setPosX(device.getPosX() + distance);  // ASC使用posX表示垂直位置
-        }
-    }
-
-    /**
-     * 创建吊机移动事件（保留原接口以兼容）
-     */
-    private SimEvent createCraneMoveEvent(long time, String craneId, String moveType, double distance, double speed) {
-        CraneMoveReq payload = new CraneMoveReq();
-        payload.setCraneId(craneId);
-        payload.setMoveType(DeviceStateEnum.valueOf(moveType));
-        payload.setDistance(distance);
-        payload.setSpeed(speed);
-
-        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_MOVE, payload);
-        event.addSubject("CRANE", craneId);
-        return event;
-    }
-
-    /**
-     * 创建吊机操作事件 (FETCH_DONE/PUT_DONE)
-     */
-    private long createCraneOperateEvent(long time, String craneId, String action, int durationMs) {
-        CraneOperationReq payload = new CraneOperationReq();
-        payload.setCraneId(craneId);
-        payload.setAction(EventTypeEnum.valueOf(action));
-        payload.setDurationMS(durationMs);
-
-        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_OP, payload);
-        event.addSubject("CRANE", craneId);
-
-        // 返回实际触发时间 = 事件时间 + 操作耗时
-        return time + durationMs;
-    }
-
-    /**
-     * 创建指派任务事件
-     */
-    private long createAssignTaskEvent(long time, String deviceId, String wiRefNo) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("wiRefNo", wiRefNo);
-
-        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_ASSIGN_TASK, payload);
-        event.addSubject("DEVICE", deviceId);
-
-        // 指派任务几乎瞬时完成，返回原时间
-        return time;
+        return Result.success("已调度完整装船业务流程测试(LOAD)");
     }
 }

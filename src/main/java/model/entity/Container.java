@@ -24,4 +24,8 @@ public class Container {
 
     private String currentPos;    // 当前位置信息
     private String status;        // 集装箱状态 (01即将作业/02不可作业)
+
+    // 物理坐标（用于前端渲染）
+    private Double posX;          // X坐标
+    private Double posY;          // Y坐标
 }
