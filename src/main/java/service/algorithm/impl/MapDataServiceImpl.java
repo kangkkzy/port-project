@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import common.exception.BusinessException;
 import model.dto.config.MapConfigDto;
 import model.dto.config.MapPathDto;
+import model.entity.Point;
 import org.springframework.stereotype.Service;
 import service.algorithm.MapDataService;
+import service.algorithm.TrajectoryValidationResult;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -209,6 +211,51 @@ public class MapDataServiceImpl implements MapDataService {
         }
 
         return new ArrayList<>();
+    }
+
+    /**
+     * 验证移动轨迹是否合法（所有点必须在路网上）
+     */
+    @Override
+    public TrajectoryValidationResult validateTrajectory(String deviceType, List<Point> pathPoints) {
+        if (pathPoints == null || pathPoints.isEmpty()) {
+            return TrajectoryValidationResult.failure("轨迹点列表为空", null);
+        }
+
+        List<Point> invalidPoints = new ArrayList<>();
+        List<Point> validSegments = new ArrayList<>();
+
+        for (Point point : pathPoints) {
+            if (!isPositionOnPath(deviceType, point.getX(), point.getY())) {
+                invalidPoints.add(point);
+            } else {
+                validSegments.add(point);
+            }
+        }
+
+        if (!invalidPoints.isEmpty()) {
+            return TrajectoryValidationResult.failure(
+                    "轨迹点脱离路网: " + invalidPoints.size() + " 个点不在合法路径上",
+                    invalidPoints
+            );
+        }
+
+        return TrajectoryValidationResult.success(validSegments);
+    }
+
+    /**
+     * 获取设备类型的合法作业跨度
+     * QC: 轨道位置 140，集卡道路 200，跨度 60 米
+     * ASC: 轨道位置 varies，集卡道路 200，跨度 varies
+     */
+    @Override
+    public double getOperationSpan(String deviceType, double truckY) {
+        if ("QC".equalsIgnoreCase(deviceType) || "CRANE_QC".equalsIgnoreCase(deviceType)) {
+            return Math.abs(140.0 - truckY);
+        } else if ("ASC".equalsIgnoreCase(deviceType) || "CRANE_ASC".equalsIgnoreCase(deviceType)) {
+            return 200.0;
+        }
+        return 0.0;
     }
 
 }

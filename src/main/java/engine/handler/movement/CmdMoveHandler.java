@@ -10,18 +10,32 @@ import engine.context.GlobalContext;
 import model.dto.request.MoveCommandReq;
 import model.entity.BaseDevice;
 import model.entity.Point;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import service.algorithm.MapDataService;
+import service.algorithm.TrajectoryValidationResult;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 集卡移动指令
+ * 集卡移动指令处理器
+ *
+ * DES架构职责：
+ * - 作为执行器，负责物理约束校验和时间推演
+ * - 外部算法负责"算路"并下发轨迹点
+ * - 引擎负责验证路径合法性和执行移动
+ *
+ * 支持两种模式：
+ * 1. 简化模式：只设置 targetPoint，引擎自动计算关键点（同路径）
+ * 2. 精确模式：设置 pathPoints，引擎按序执行（跨路径）
  */
 @Component
 public class CmdMoveHandler implements SimEventHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(CmdMoveHandler.class);
 
     private final MapDataService mapDataService;
 
@@ -45,7 +59,6 @@ public class CmdMoveHandler implements SimEventHandler {
             throw new BusinessException(String.format("设备 %s 状态(%s)繁忙，无法执行移动", device.getId(), device.getState()));
         }
 
-        // 🟢 修改点：直接将载荷转为 MoveCommandReq 对象
         MoveCommandReq payload = (MoveCommandReq) event.getData();
         Double speed = payload.getSpeed();
         if (speed == null || speed <= 0) {
@@ -58,23 +71,51 @@ public class CmdMoveHandler implements SimEventHandler {
         double endX = target.getX();
         double endY = target.getY();
 
-        // 获取路径上的关键点
-        String deviceType = device.getType().name();
-        List<Double> keyPoints = mapDataService.getKeyPointsBetween(deviceType, startX, startY, endX, endY);
-
-        // 将关键点转换为路径坐标点列表
         List<Point> remainingTargets = new ArrayList<>();
-        boolean isHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
 
-        for (Double keyPoint : keyPoints) {
-            if (isHorizontal) {
-                remainingTargets.add(new Point(keyPoint, endY));
-            } else {
-                remainingTargets.add(new Point(endX, keyPoint));
+        // === 精确模式：外部算法已提供轨迹点列表 ===
+        if (payload.getPathPoints() != null && !payload.getPathPoints().isEmpty()) {
+            List<Point> externalPath = payload.getPathPoints();
+
+            // 校验路径合法性（如果启用）
+            if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {
+                String deviceType = device.getType().name();
+                TrajectoryValidationResult validation = mapDataService.validateTrajectory(deviceType, externalPath);
+                if (!validation.isValid()) {
+                    String errorMsg = String.format("移动轨迹不合法，脱离路网: %s。轨迹点: %s",
+                            validation.getErrorMessage(), externalPath);
+                    log.error(errorMsg);
+                    throw new BusinessException(errorMsg);
+                }
+            }
+
+            // 使用外部提供的轨迹点（从起点开始拼接）
+            remainingTargets.add(new Point(startX, startY));
+            remainingTargets.addAll(externalPath);
+
+            // 确保最终目标在列表中
+            Point lastPoint = remainingTargets.get(remainingTargets.size() - 1);
+            if (lastPoint.getX() != endX || lastPoint.getY() != endY) {
+                remainingTargets.add(target);
             }
         }
-        // 添加最终目标
-        remainingTargets.add(target);
+        // === 简化模式：引擎自动计算关键点 ===
+        else {
+            String deviceType = device.getType().name();
+            List<Double> keyPoints = mapDataService.getKeyPointsBetween(deviceType, startX, startY, endX, endY);
+
+            boolean isHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
+
+            for (Double keyPoint : keyPoints) {
+                if (isHorizontal) {
+                    remainingTargets.add(new Point(keyPoint, endY));
+                } else {
+                    remainingTargets.add(new Point(endX, keyPoint));
+                }
+            }
+            // 添加最终目标
+            remainingTargets.add(target);
+        }
 
         // 将剩余目标列表存入设备
         device.setRemainingMoveTargets(remainingTargets);
@@ -86,5 +127,9 @@ public class CmdMoveHandler implements SimEventHandler {
         // 调度MOVE_START事件
         SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
         moveStart.addSubject("TRUCK", truckId);
+
+        log.info("[CMD_MOVE] 设备 [{}] 移动轨迹: {} -> {}", truckId,
+                String.format("(%.1f,%.1f)", startX, startY),
+                String.format("(%.1f,%.1f)", endX, endY));
     }
 }

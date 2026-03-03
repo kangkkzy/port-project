@@ -1,6 +1,7 @@
 package service.algorithm;
 
 import model.dto.config.MapPathDto;
+import model.entity.Point;
 
 import java.util.List;
 
@@ -56,5 +57,22 @@ public interface MapDataService {
      * @return 关键点列表（包含起点和终点之间的所有中间节点坐标）
      */
     List<Double> getKeyPointsBetween(String deviceType, double startX, double startY, double endX, double endY);
+
+    /**
+     * 验证移动轨迹是否合法（所有点必须在路网上）
+     * @param deviceType 设备类型
+     * @param pathPoints 轨迹点列表
+     * @return 验证结果
+     */
+    TrajectoryValidationResult validateTrajectory(String deviceType, List<Point> pathPoints);
+
+    /**
+     * 获取设备类型的合法作业跨度
+     * 例如：QC 的合法作业跨度是 60 米（QC轨道Y=140 与集卡道路 Y=200 之间的偏移）
+     * @param deviceType 设备类型 (QC, ASC)
+     * @param truckY 集卡道路 Y 坐标（用于计算偏移）
+     * @return 合法作业跨度（米）
+     */
+    double getOperationSpan(String deviceType, double truckY);
 
 }

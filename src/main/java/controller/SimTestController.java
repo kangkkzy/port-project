@@ -3,12 +3,16 @@ package controller;
 import common.Result;
 import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
-import common.consts.DeviceTypeEnum;
 import common.consts.EventTypeEnum;
-import common.consts.WiStatusEnum;
 import engine.SimulationEngine;
+import engine.SimEvent;
 import engine.context.GlobalContext;
-import model.entity.*;
+import model.entity.AscDevice;
+import model.entity.Container;
+import model.entity.Point;
+import model.entity.QcDevice;
+import model.entity.Truck;
+import model.entity.WorkInstruction;
 import model.dto.request.CraneMoveReq;
 import model.dto.request.CraneOperationReq;
 import model.dto.request.MoveCommandReq;
@@ -22,9 +26,19 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 仿真测试场景接口
- * 包含单场景测试与进出口生命周期任务链测试
- * 严格遵循 map-config.json 坐标，避免海域扎堆
+ * 仿真测试场景接口 - 用于演示和调试
+ *
+ * 业务流程测试场景
+ *
+ * 关键规则（符合DES架构）：
+ * 1. TRUCK只能在TRUCK_ROAD上移动 (Y=200, Y=550)
+ * 2. ASC只能在ASC_RAIL垂直轨道上移动 (X=175, 425, 675)
+ * 3. QC只能在QC_RAIL水平轨道上移动 (Y=140)
+ * 4. 设备执行FETCH_DONE/PUT_DONE前必须先完成移动，状态为IDLE
+ * 5. 每个FETCH_DONE/PUT_DONE之前必须先通过CMD_ASSIGN_TASK绑定作业指令
+ * 6. 设备与集卡支持跨距作业：
+ *    - QC与集卡：Y方向允许60米偏移 (QC轨道140 vs 集卡道路200)
+ *    - ASC与集卡：X方向需要接近轨道位置
  */
 @RestController
 @RequestMapping("/sim/test")
@@ -36,268 +50,456 @@ public class SimTestController {
         this.engine = engine;
     }
 
-    private GlobalContext resetAndGetContext() {
+    /**
+     * 执行集卡完整业务流程测试 (DSCH卸船)
+     * 场景：集卡到达 -> QC装货 -> 集卡移动 -> ASC卸货
+     *
+     * 物理流程：
+     * 1. 集卡从道路移动到QC下方 (Y=200 -> QC轨道X对应位置)
+     * 2. QC从船上抓箱放到集卡 (QC在Y=140轨道X移动，集卡在Y=200车道)
+     * 3. 集卡从QC下方移动到ASC下方
+     * 4. ASC从集卡抓箱放到堆场 (ASC在X轨道移动，集卡在Y=200车道)
+     *
+     * DES架构说明：
+     * - 外部算法（测试脚本）负责生成符合路网的轨迹点
+     * - 集卡必须在TRUCK_ROAD (Y=200) 上行驶
+     * - QC与集卡跨距作业：Y方向偏移60米 (140 -> 200)
+     */
+    @PostMapping("/truck-delivery")
+    public Result testTruckDelivery() {
         GlobalContext ctx = GlobalContext.getInstance();
-        ctx.clearAll();
-        engine.reset();
-        ctx.setSimTime(0L);
-        return ctx;
+
+        Truck truck = ctx.getTruckMap().get("TRUCK_01");
+        QcDevice qc = ctx.getQcMap().get("QC_01");
+        AscDevice asc = ctx.getAscMap().get("ASC_01");
+
+        if (truck == null) return Result.error("请先加载包含 TRUCK_01 的测试场景");
+        if (qc == null) return Result.error("请先加载包含 QC_01 的测试场景");
+        if (asc == null) return Result.error("请先加载包含 ASC_01 的测试场景");
+
+        // 1. 初始化设备位置
+        // QC在X=0, Y=140轨道
+        qc.setPosX(0.0);
+        qc.setPosY(0.0);  // QC实际位置是posX(在轨道上移动)，posY固定为0
+        qc.setState(DeviceStateEnum.IDLE);
+        qc.setCurrWiRefNo(null);
+        qc.setCurrentTargetPos(null);
+
+        // ASC在X=100 (对应轨道X=175附近), Y=0
+        asc.setPosX(175.0);  // 对应ASC_RAIL X=175
+        asc.setPosY(0.0);
+        asc.setState(DeviceStateEnum.IDLE);
+        asc.setCurrWiRefNo(null);
+        asc.setCurrentTargetPos(null);
+
+        // 集卡初始位置 - 在TRUCK_ROAD Y=200上
+        truck.setPosX(0.0);
+        truck.setPosY(200.0);  // 必须在合法道路 Y=200 上
+        truck.setState(DeviceStateEnum.IDLE);
+        truck.setCurrentTargetPos(null);
+        truck.setRemainingMoveTargets(new ArrayList<>());
+
+        // 2. 创建作业指令 (DSCH流程)
+        WorkInstruction wiQc = new WorkInstruction();
+        wiQc.setWiRefNo("WI_QC_DSCH");
+        wiQc.setContainerId("CONT_DSCH");
+        wiQc.setMoveKind(BizTypeEnum.DSCH);
+        wiQc.setFetchCheId("QC_01");
+        wiQc.setCarryCheId("TRUCK_01");
+        wiQc.setFromPos("VESSEL_01");
+        wiQc.setToPos("TRUCK_01");
+        ctx.getWorkInstructionMap().put("WI_QC_DSCH", wiQc);
+
+        WorkInstruction wiAsc = new WorkInstruction();
+        wiAsc.setWiRefNo("WI_ASC_DSCH");
+        wiAsc.setContainerId("CONT_DSCH");
+        wiAsc.setMoveKind(BizTypeEnum.DSCH);
+        wiAsc.setFetchCheId("ASC_01");
+        wiAsc.setCarryCheId("TRUCK_01");
+        wiAsc.setFromPos("TRUCK_01");
+        wiAsc.setToPos("YARD_B");
+        ctx.getWorkInstructionMap().put("WI_ASC_DSCH", wiAsc);
+
+        // 3. 创建集装箱
+        Container container = new Container();
+        container.setContainerId("CONT_DSCH");
+        container.setCurrentPos("VESSEL_01");
+        ctx.getContainerMap().put("CONT_DSCH", container);
+
+        long baseTime = ctx.getSimTime();
+
+        // ======== 事件链 ========
+
+        // === 阶段1: 集卡移动到QC下方 ===
+        // 集卡从(0,200)移动到(0,200)（已在目标位置，使用轨迹点方式）
+        // 轨迹：只有终点 (0,200)
+        createMoveEventWithPath(baseTime + 1000, "TRUCK_01", 0.0, 200.0, 20.0, null);
+
+        // === 阶段2: QC装货到集卡 ===
+
+        // 1. 指派任务给QC
+        createAssignTaskEvent(baseTime + 2000, "QC_01", "WI_QC_DSCH");
+
+        // 2. QC从船上抓箱 - QC先移动到船边
+        // QC在X=0，需要移动到X=-30(船边)，距离30米，速度10m/s
+        createCraneMoveEvent(baseTime + 3000, "QC_01", "MOVE_HORIZONTAL", -30.0, 10.0);
+
+        // 3. QC抓箱
+        createCraneOperateEvent(baseTime + 6000, "QC_01", "FETCH_DONE", 3000);
+
+        // 4. QC移动回集卡上方 - 从X=-30回到X=0
+        createCraneMoveEvent(baseTime + 9000, "QC_01", "MOVE_HORIZONTAL", 30.0, 10.0);
+
+        // 5. QC放箱到集卡
+        // 集卡在(0,200)，QC在X=0，Y方向偏移60米(140->200)，在允许跨距内
+        createCraneOperateEvent(baseTime + 12000, "QC_01", "PUT_DONE", 3000);
+
+        // === 阶段3: 集卡移动到ASC下方 ===
+        // 集卡从(0,200)移动到(175,200)
+        // 轨迹点：先在Y=200道路直行
+        createMoveEventWithPath(baseTime + 16000, "TRUCK_01", 175.0, 200.0, 20.0, null);
+
+        // === 阶段4: ASC从集卡抓箱 ===
+
+        // 1. 指派任务给ASC
+        createAssignTaskEvent(baseTime + 17000, "ASC_01", "WI_ASC_DSCH");
+
+        // 2. ASC从集卡抓箱
+        // ASC在X=175，集卡在(175,200)，X相同，Y偏移200米在允许范围内
+        createCraneOperateEvent(baseTime + 18000, "ASC_01", "FETCH_DONE", 3000);
+
+        // 3. ASC移动到堆场 - ASC在Y=0，需要移动到Y=30(堆场)
+        createCraneMoveEvent(baseTime + 21000, "ASC_01", "MOVE_VERTICAL", 30.0, 8.0);
+
+        // 4. ASC放箱到堆场
+        createCraneOperateEvent(baseTime + 24000, "ASC_01", "PUT_DONE", 3000);
+
+        return Result.success("已调度集卡完整业务流程测试(DSCH) - 使用正确路网轨迹");
     }
 
-    // ================== 🌟 核心升级：完整生命周期任务链 ==================
-    @PostMapping("/task-chain")
-    public Result testTaskChain() {
-        resetAndGetContext();
+    /**
+     * 执行桥吊QC装船业务流程测试 (LOAD)
+     * 场景：集卡到达 -> QC从集卡抓箱放到船上
+     *
+     * 物理流程：
+     * 1. 集卡在TRUCK_ROAD (Y=200) 等待
+     * 2. QC从集卡抓箱 (跨距作业，Y方向偏移60米)
+     * 3. QC移动到船边放箱
+     */
+    @PostMapping("/qc-loading")
+    public Result testQcLoading() {
+        GlobalContext ctx = GlobalContext.getInstance();
+        QcDevice qc = ctx.getQcMap().get("QC_01");
+        Truck truck = ctx.getTruckMap().get("TRUCK_01");
 
-        double qcX = 200.0, qcY = 140.0;             // 岸桥位置 (轨道y=140)
-        double asc1X = 175.0, asc1Y = 300.0;         // 1号堆场龙门吊 (轨道x=175)
-        double asc2X = 425.0, asc2Y = 300.0;         // 2号堆场龙门吊 (轨道x=425)
-        double gateX = 500.0, gateY = 550.0;         // 闸口位置 (道路y=550)
-        double speed = 10.0;                         // 集卡速度
+        if (qc == null) return Result.error("请先加载包含 QC_01 的测试场景");
+        if (truck == null) return Result.error("请先加载包含 TRUCK_01 的测试场景");
 
-        createQc("QC_01", qcX, qcY);
-        createAsc("ASC_01", asc1X, asc1Y);
-        createAsc("ASC_02", asc2X, asc2Y);
+        // 1. 初始化设备位置
+        // QC在X=50, Y=140轨道
+        qc.setPosX(50.0);
+        qc.setPosY(0.0);  // QC位置由posX决定，posY固定
+        qc.setState(DeviceStateEnum.IDLE);
+        qc.setCurrWiRefNo(null);
+        qc.setCurrentTargetPos(null);
 
-        createTruck("TRUCK_IN", qcX, qcY);
-        createTruck("TRUCK_OUT", gateX, gateY);
-        createContainer("CONT_CHAIN_01", "VESSEL_01");
+        // 集卡在TRUCK_ROAD Y=200
+        truck.setPosX(50.0);
+        truck.setPosY(200.0);  // 必须在合法道路 Y=200 上
+        truck.setState(DeviceStateEnum.IDLE);
+        truck.setCurrentTargetPos(null);
+        truck.setRemainingMoveTargets(new ArrayList<>());
 
-        createWi("WI_01_DSCH", "CONT_CHAIN_01", BizTypeEnum.DSCH, "QC_01", "TRUCK_IN", "ASC_01", "VESSEL_01", "YARD_01");
-        createWi("WI_02_SHIFT", "CONT_CHAIN_01", BizTypeEnum.YARD_SHIFT, "ASC_01", "TRUCK_IN", "ASC_02", "YARD_01", "YARD_02");
-        createWi("WI_03_DLVR", "CONT_CHAIN_01", BizTypeEnum.DLVR, "ASC_02", "TRUCK_OUT", null, "YARD_02", "GATE_01");
+        // 2. 创建作业指令
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_QC_LOAD");
+        wi.setContainerId("CONT_LOAD");
+        wi.setMoveKind(BizTypeEnum.LOAD);
+        wi.setFetchCheId("QC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setFromPos("TRUCK_01");
+        wi.setToPos("VESSEL_01");
+        ctx.getWorkInstructionMap().put("WI_QC_LOAD", wi);
 
-        long t = 0;
+        // 3. 创建集装箱
+        Container container = new Container();
+        container.setContainerId("CONT_LOAD");
+        container.setCurrentPos("TRUCK_01");
+        ctx.getContainerMap().put("CONT_LOAD", container);
 
-        // 【环节一：DSCH 卸船 (Vessel -> Yard 1)】
-        createAssignTaskEvent(t, "QC_01", "WI_01_DSCH");
-        createCraneOperateEvent(t + 100, "QC_01", "FETCH_DONE", 1500);
-        createCraneOperateEvent(t + 2000, "QC_01", "PUT_DONE", 1500);
+        long baseTime = ctx.getSimTime();
 
-        t += 4000;
-        long arrTimeAsc1 = scheduleMove(t, "TRUCK_IN", qcX, qcY, asc1X, asc1Y, speed);
+        // 1. 指派任务给QC
+        createAssignTaskEvent(baseTime + 1000, "QC_01", "WI_QC_LOAD");
 
-        t = arrTimeAsc1;
-        createAssignTaskEvent(t, "ASC_01", "WI_01_DSCH");
-        createCraneOperateEvent(t + 500, "ASC_01", "FETCH_DONE", 1500);
-        createCraneOperateEvent(t + 2500, "ASC_01", "PUT_DONE", 1500);
+        // 2. QC从集卡抓箱
+        // 集卡在(50,200)，QC在X=50，Y方向偏移60米(140->200)，在允许跨距内
+        createCraneOperateEvent(baseTime + 2000, "QC_01", "FETCH_DONE", 3000);
 
-        // 【环节二：YARD_SHIFT 场内移箱 (Yard 1 -> Yard 2)】
-        t += 5000;
-        createAssignTaskEvent(t, "ASC_01", "WI_02_SHIFT");
-        createCraneOperateEvent(t + 500, "ASC_01", "FETCH_DONE", 1500);
-        createCraneOperateEvent(t + 2500, "ASC_01", "PUT_DONE", 1500);
+        // 3. QC移动到船边 - 从X=50移动到X=20(船边)，距离30米，速度10m/s
+        createCraneMoveEvent(baseTime + 5100, "QC_01", "MOVE_HORIZONTAL", -30.0, 10.0);
 
-        t += 4500;
-        long arrTimeAsc2 = scheduleMove(t, "TRUCK_IN", asc1X, asc1Y, asc2X, asc2Y, speed);
+        // 4. QC放箱到船上
+        createCraneOperateEvent(baseTime + 8200, "QC_01", "PUT_DONE", 3000);
 
-        t = arrTimeAsc2;
-        createAssignTaskEvent(t, "ASC_02", "WI_02_SHIFT");
-        createCraneOperateEvent(t + 500, "ASC_02", "FETCH_DONE", 1500);
-        createCraneOperateEvent(t + 2500, "ASC_02", "PUT_DONE", 1500);
-
-        // 【环节三：DLVR 外场提箱 (Yard 2 -> Gate)】
-        t += 5000;
-        long arrTimeOutTruck = scheduleMove(t, "TRUCK_OUT", gateX, gateY, asc2X, asc2Y, speed);
-
-        t = arrTimeOutTruck;
-        createAssignTaskEvent(t, "ASC_02", "WI_03_DLVR");
-        createCraneOperateEvent(t + 500, "ASC_02", "FETCH_DONE", 1500);
-        createCraneOperateEvent(t + 2500, "ASC_02", "PUT_DONE", 1500);
-
-        t += 4500;
-        scheduleMove(t, "TRUCK_OUT", asc2X, asc2Y, gateX, gateY, speed);
-
-        return Result.success("✨ 进出口完整任务链已注入内核并排期完毕！");
+        return Result.success("已调度QC装船业务流程测试(LOAD) - 使用正确路网轨迹");
     }
 
-    // ================== 单一场景测试 ==================
+    /**
+     * 执行龙门吊ASC卸箱业务流程测试 (DLVR)
+     * 场景：集卡到达 -> ASC从集卡抓箱放到堆场
+     *
+     * 物理流程：
+     * 1. 集卡在TRUCK_ROAD (Y=200) 移动到ASC轨道X位置
+     * 2. ASC从集卡抓箱 (跨距作业，X方向接近轨道)
+     * 3. ASC移动到堆场放箱
+     */
+    @PostMapping("/asc-unloading")
+    public Result testAscUnloading() {
+        GlobalContext ctx = GlobalContext.getInstance();
+        AscDevice asc = ctx.getAscMap().get("ASC_01");
+        Truck truck = ctx.getTruckMap().get("TRUCK_01");
 
-    @PostMapping("/dsch")
-    public Result testDsch() {
-        resetAndGetContext();
-        double qcX = 200.0, qcY = 140.0;
-        double ascX = 175.0, ascY = 300.0;
-        double speed = 10.0;
+        if (asc == null) return Result.error("请先加载包含 ASC_01 的测试场景");
+        if (truck == null) return Result.error("请先加载包含 TRUCK_01 的测试场景");
 
-        createQc("QC_01", qcX, qcY);
-        createAsc("ASC_01", ascX, ascY);
-        createTruck("TRUCK_01", qcX, qcY);
-        createContainer("CONT_01", "VESSEL_01");
-        createWi("WI_DSCH", "CONT_01", BizTypeEnum.DSCH, "QC_01", "TRUCK_01", "ASC_01", "VESSEL_01", "YARD_01");
+        // 1. 初始化设备位置
+        // ASC在X=175 (对应ASC_RAIL)
+        asc.setPosX(175.0);
+        asc.setPosY(0.0);
+        asc.setState(DeviceStateEnum.IDLE);
+        asc.setCurrWiRefNo(null);
+        asc.setCurrentTargetPos(null);
 
-        createAssignTaskEvent(0, "QC_01", "WI_DSCH");
-        createCraneOperateEvent(100, "QC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "QC_01", "PUT_DONE", 1000);
+        // 集卡在TRUCK_ROAD Y=200
+        truck.setPosX(175.0);
+        truck.setPosY(200.0);  // 必须在合法道路 Y=200 上
+        truck.setState(DeviceStateEnum.IDLE);
+        truck.setCurrentTargetPos(null);
+        truck.setRemainingMoveTargets(new ArrayList<>());
 
-        long arrivalTime = scheduleMove(3500, "TRUCK_01", qcX, qcY, ascX, ascY, speed);
+        // 2. 创建作业指令
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_ASC_DLVR");
+        wi.setContainerId("CONT_DLVR");
+        wi.setMoveKind(BizTypeEnum.DLVR);
+        wi.setFetchCheId("ASC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setFromPos("TRUCK_01");
+        wi.setToPos("YARD_B");
+        ctx.getWorkInstructionMap().put("WI_ASC_DLVR", wi);
 
-        createAssignTaskEvent(arrivalTime, "ASC_01", "WI_DSCH");
-        createCraneOperateEvent(arrivalTime + 500, "ASC_01", "FETCH_DONE", 2000);
-        createCraneOperateEvent(arrivalTime + 3000, "ASC_01", "PUT_DONE", 2000);
+        // 3. 创建集装箱
+        Container container = new Container();
+        container.setContainerId("CONT_DLVR");
+        container.setCurrentPos("TRUCK_01");
+        ctx.getContainerMap().put("CONT_DLVR", container);
 
-        return Result.success("已调度 DSCH(卸船) 测试");
+        long baseTime = ctx.getSimTime();
+
+        // 1. 指派任务给ASC
+        createAssignTaskEvent(baseTime + 1000, "ASC_01", "WI_ASC_DLVR");
+
+        // 2. ASC从集卡抓箱
+        // ASC在X=175，集卡在(175,200)，X相同，Y偏移在允许范围内
+        createCraneOperateEvent(baseTime + 2000, "ASC_01", "FETCH_DONE", 3000);
+
+        // 3. ASC移动到堆场 - 从Y=0移动到Y=25(堆场)
+        createCraneMoveEvent(baseTime + 5100, "ASC_01", "MOVE_VERTICAL", 25.0, 8.0);
+
+        // 4. ASC放箱到堆场
+        createCraneOperateEvent(baseTime + 8300, "ASC_01", "PUT_DONE", 3000);
+
+        return Result.success("已调度ASC卸箱业务流程测试(DLVR) - 使用正确路网轨迹");
     }
 
-    @PostMapping("/load")
-    public Result testLoad() {
-        resetAndGetContext();
-        double ascX = 425.0, ascY = 400.0;
-        double qcX = 400.0, qcY = 140.0;
-        double speed = 10.0;
+    /**
+     * 执行完整装船流程测试 (LOAD)
+     * 场景：ASC装货 -> 集卡移动 -> QC装船
+     *
+     * 物理流程：
+     * 1. ASC在X=175轨道，集卡在Y=200道路
+     * 2. ASC抓箱放到集卡 (跨距作业)
+     * 3. 集卡移动到QC下方 (Y=200道路)
+     * 4. QC从集卡抓箱 (跨距作业)
+     * 5. QC移动到船边放箱
+     */
+    @PostMapping("/full-loading")
+    public Result testFullLoading() {
+        GlobalContext ctx = GlobalContext.getInstance();
+        AscDevice asc = ctx.getAscMap().get("ASC_01");
+        QcDevice qc = ctx.getQcMap().get("QC_01");
+        Truck truck = ctx.getTruckMap().get("TRUCK_01");
 
-        createAsc("ASC_01", ascX, ascY);
-        createQc("QC_01", qcX, qcY);
-        createTruck("TRUCK_01", ascX, ascY);
-        createContainer("CONT_01", "YARD_01");
-        createWi("WI_LOAD", "CONT_01", BizTypeEnum.LOAD, "ASC_01", "TRUCK_01", "QC_01", "YARD_01", "VESSEL_01");
+        if (asc == null) return Result.error("请先加载包含 ASC_01 的测试场景");
+        if (qc == null) return Result.error("请先加载包含 QC_01 的测试场景");
+        if (truck == null) return Result.error("请先加载包含 TRUCK_01 的测试场景");
 
-        createAssignTaskEvent(0, "ASC_01", "WI_LOAD");
-        createCraneOperateEvent(100, "ASC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "ASC_01", "PUT_DONE", 1000);
+        // 1. 初始化设备位置
+        // ASC在X=175轨道
+        asc.setPosX(175.0);
+        asc.setPosY(0.0);
+        asc.setState(DeviceStateEnum.IDLE);
+        asc.setCurrWiRefNo(null);
+        asc.setCurrentTargetPos(null);
 
-        long arrivalTime = scheduleMove(3500, "TRUCK_01", ascX, ascY, qcX, qcY, speed);
+        // 集卡在TRUCK_ROAD Y=200
+        truck.setPosX(175.0);
+        truck.setPosY(200.0);  // 必须在合法道路 Y=200 上
+        truck.setState(DeviceStateEnum.IDLE);
+        truck.setCurrentTargetPos(null);
+        truck.setRemainingMoveTargets(new ArrayList<>());
 
-        createAssignTaskEvent(arrivalTime, "QC_01", "WI_LOAD");
-        createCraneOperateEvent(arrivalTime + 500, "QC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(arrivalTime + 2000, "QC_01", "PUT_DONE", 1000);
+        // QC在X=80, Y=140轨道
+        qc.setPosX(80.0);
+        qc.setPosY(0.0);
+        qc.setState(DeviceStateEnum.IDLE);
+        qc.setCurrWiRefNo(null);
+        qc.setCurrentTargetPos(null);
 
-        return Result.success("已调度 LOAD(装船) 测试");
+        // 2. 创建作业指令
+        WorkInstruction wi = new WorkInstruction();
+        wi.setWiRefNo("WI_LOAD_FULL");
+        wi.setContainerId("CONT_LOAD");
+        wi.setMoveKind(BizTypeEnum.LOAD);
+        wi.setFetchCheId("ASC_01");
+        wi.setCarryCheId("TRUCK_01");
+        wi.setPutCheId("QC_01");
+        wi.setFromPos("YARD_A");
+        wi.setToPos("VESSEL_01");
+        ctx.getWorkInstructionMap().put("WI_LOAD_FULL", wi);
+
+        // 3. 创建集装箱
+        Container container = new Container();
+        container.setContainerId("CONT_LOAD");
+        container.setCurrentPos("YARD_A");
+        ctx.getContainerMap().put("CONT_LOAD", container);
+
+        long baseTime = ctx.getSimTime();
+
+        // === 阶段1: ASC装货到集卡 ===
+
+        // 1. 指派任务给ASC
+        createAssignTaskEvent(baseTime + 1000, "ASC_01", "WI_LOAD_FULL");
+
+        // 2. ASC从堆场抓箱
+        createCraneOperateEvent(baseTime + 2000, "ASC_01", "FETCH_DONE", 3000);
+
+        // 3. ASC放箱到集卡
+        // ASC在X=175，集卡在(175,200)，X相同，Y偏移在允许范围内
+        createCraneOperateEvent(baseTime + 5100, "ASC_01", "PUT_DONE", 3000);
+
+        // === 阶段2: 集卡移动到QC ===
+
+        // 集卡从(175,200)移动到(80,200)，在Y=200道路上
+        createMoveEvent(baseTime + 8200, "TRUCK_01", 80.0, 200.0, 20.0);
+
+        // === 阶段3: QC装船 ===
+
+        // 1. 指派任务给QC
+        createAssignTaskEvent(baseTime + 12500, "QC_01", "WI_LOAD_FULL");
+
+        // 2. QC从集卡抓箱
+        // 集卡在(80,200)，QC在X=80，Y方向偏移60米(140->200)，在允许跨距内
+        createCraneOperateEvent(baseTime + 13000, "QC_01", "FETCH_DONE", 3000);
+
+        // 3. QC移动到船边 - 从X=80移动到X=30(船边)
+        createCraneMoveEvent(baseTime + 16500, "QC_01", "MOVE_HORIZONTAL", -50.0, 10.0);
+
+        // 4. QC放箱到船上
+        createCraneOperateEvent(baseTime + 22000, "QC_01", "PUT_DONE", 3000);
+
+        return Result.success("已调度完整装船业务流程测试(LOAD)");
     }
 
-    @PostMapping("/yard-shift")
-    public Result testYardShift() {
-        resetAndGetContext();
-        double asc1X = 175.0, ascY = 450.0;
-        double asc2X = 675.0;
-        double speed = 10.0;
+    // ==================== 辅助方法 ====================
 
-        createAsc("ASC_01", asc1X, ascY);
-        createAsc("ASC_02", asc2X, ascY);
-        createTruck("TRUCK_01", asc1X, ascY);
-        createContainer("CONT_01", "YARD_01");
-        createWi("WI_SHIFT", "CONT_01", BizTypeEnum.YARD_SHIFT, "ASC_01", "TRUCK_01", "ASC_02", "YARD_01", "YARD_02");
-
-        createAssignTaskEvent(0, "ASC_01", "WI_SHIFT");
-        createCraneOperateEvent(100, "ASC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "ASC_01", "PUT_DONE", 1000);
-
-        long arrivalTime = scheduleMove(3500, "TRUCK_01", asc1X, ascY, asc2X, ascY, speed);
-
-        createAssignTaskEvent(arrivalTime, "ASC_02", "WI_SHIFT");
-        createCraneOperateEvent(arrivalTime + 500, "ASC_02", "FETCH_DONE", 1000);
-        createCraneOperateEvent(arrivalTime + 2000, "ASC_02", "PUT_DONE", 1000);
-
-        return Result.success("已调度 YARD_SHIFT(场内移箱) 测试");
-    }
-
-    @PostMapping("/dlvr")
-    public Result testDlvr() {
-        resetAndGetContext();
-        double ascX = 675.0, ascY = 350.0;
-        createAsc("ASC_01", ascX, ascY);
-        createTruck("TRUCK_01", ascX, ascY);
-        createContainer("CONT_01", "YARD_01");
-        createWi("WI_DLVR", "CONT_01", BizTypeEnum.DLVR, "ASC_01", "TRUCK_01", null, "YARD_01", "GATE_01");
-
-        createAssignTaskEvent(0, "ASC_01", "WI_DLVR");
-        createCraneOperateEvent(100, "ASC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "ASC_01", "PUT_DONE", 1000);
-        return Result.success("已调度 DLVR(外场提箱) 测试");
-    }
-
-    @PostMapping("/recv")
-    public Result testRecv() {
-        resetAndGetContext();
-        double ascX = 175.0, ascY = 250.0;
-        createAsc("ASC_01", ascX, ascY);
-        createTruck("TRUCK_01", ascX, ascY);
-        createContainer("CONT_01", "TRUCK_01");
-        createWi("WI_RECV", "CONT_01", BizTypeEnum.RECV, null, "TRUCK_01", "ASC_01", "GATE_01", "YARD_01");
-
-        createAssignTaskEvent(0, "ASC_01", "WI_RECV");
-        createCraneOperateEvent(100, "ASC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "ASC_01", "PUT_DONE", 1000);
-        return Result.success("已调度 RECV(外场收箱) 测试");
-    }
-
-    @PostMapping("/direct-in")
-    public Result testDirectIn() {
-        resetAndGetContext();
-        double qcX = 600.0, qcY = 140.0;
-        createQc("QC_01", qcX, qcY);
-        createTruck("TRUCK_01", qcX, qcY);
-        createContainer("CONT_01", "TRUCK_01");
-        createWi("WI_DIN", "CONT_01", BizTypeEnum.DIRECT_IN, null, "TRUCK_01", "QC_01", "GATE_01", "VESSEL_01");
-
-        createAssignTaskEvent(0, "QC_01", "WI_DIN");
-        createCraneOperateEvent(100, "QC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "QC_01", "PUT_DONE", 1000);
-        return Result.success("已调度 DIRECT_IN(直进装船) 测试");
-    }
-
-    @PostMapping("/direct-out")
-    public Result testDirectOut() {
-        resetAndGetContext();
-        double qcX = 200.0, qcY = 140.0;
-        createQc("QC_01", qcX, qcY);
-        createTruck("TRUCK_01", qcX, qcY);
-        createContainer("CONT_01", "VESSEL_01");
-        createWi("WI_DOUT", "CONT_01", BizTypeEnum.DIRECT_OUT, "QC_01", "TRUCK_01", null, "VESSEL_01", "GATE_01");
-
-        createAssignTaskEvent(0, "QC_01", "WI_DOUT");
-        createCraneOperateEvent(100, "QC_01", "FETCH_DONE", 1000);
-        createCraneOperateEvent(2000, "QC_01", "PUT_DONE", 1000);
-        return Result.success("已调度 DIRECT_OUT(直提卸船) 测试");
-    }
-
-    // ==================== 实体与事件辅助构建方法 ====================
-
-    private long scheduleMove(long startTime, String truckId, double startX, double startY, double targetX, double targetY, double speed) {
-        double dist = Math.sqrt(Math.pow(targetX - startX, 2) + Math.pow(targetY - startY, 2));
-        long moveTime = (long) ((dist / speed) * 1000);
-
+    /**
+     * 创建集卡移动事件 (简化模式 - 引擎自动计算关键点)
+     * TRUCK只能在TRUCK_ROAD上移动 (Y=200 或 Y=550)
+     */
+    private SimEvent createMoveEvent(long time, String truckId, double targetX, double targetY, double speed) {
         MoveCommandReq payload = new MoveCommandReq();
         payload.setTruckId(truckId);
         payload.setTargetPoint(new Point(targetX, targetY));
         payload.setSpeed(speed);
-        engine.scheduleEvent(null, startTime, EventTypeEnum.CMD_MOVE, payload).addSubject("TRUCK", truckId);
+        payload.setEnforcePathValidation(true);  // 启用路径校验
 
-        return startTime + moveTime + 200;
+        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_MOVE, payload);
+        event.addSubject("TRUCK", truckId);
+        return event;
     }
 
-    private void createQc(String id, double x, double y) {
-        QcDevice qc = new QcDevice(); qc.setId(id); qc.setType(DeviceTypeEnum.QC); qc.setState(DeviceStateEnum.IDLE); qc.setPosX(x); qc.setPosY(y);
-        GlobalContext.getInstance().getQcMap().put(id, qc);
+    /**
+     * 创建集卡移动事件 (精确模式 - 外部算法提供轨迹点)
+     * 轨迹点必须位于合法的TRUCK_ROAD上
+     *
+     * @param time 触发时间
+     * @param truckId 集卡ID
+     * @param targetX 目标X坐标
+     * @param targetY 目标Y坐标
+     * @param speed 移动速度
+     * @param pathPoints 轨迹点列表（可null表示使用简化模式）
+     */
+    private SimEvent createMoveEventWithPath(long time, String truckId, double targetX, double targetY, double speed, java.util.List<Point> pathPoints) {
+        MoveCommandReq payload = new MoveCommandReq();
+        payload.setTruckId(truckId);
+        payload.setTargetPoint(new Point(targetX, targetY));
+        payload.setSpeed(speed);
+        payload.setPathPoints(pathPoints);
+        payload.setEnforcePathValidation(true);  // 启用路径校验
+
+        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_MOVE, payload);
+        event.addSubject("TRUCK", truckId);
+
+        // 记录日志
+        if (pathPoints != null && !pathPoints.isEmpty()) {
+            System.out.println("[移动指令] 集卡 " + truckId + " 轨迹点数: " + pathPoints.size());
+        }
+
+        return event;
     }
 
-    private void createAsc(String id, double x, double y) {
-        AscDevice asc = new AscDevice(); asc.setId(id); asc.setType(DeviceTypeEnum.ASC); asc.setState(DeviceStateEnum.IDLE); asc.setPosX(x); asc.setPosY(y);
-        GlobalContext.getInstance().getAscMap().put(id, asc);
+    /**
+     * 创建吊机移动事件
+     * ASC只能在垂直方向(MOVE_VERTICAL)移动
+     * QC只能在水平方向(MOVE_HORIZONTAL)移动
+     */
+    private SimEvent createCraneMoveEvent(long time, String craneId, String moveType, double distance, double speed) {
+        CraneMoveReq payload = new CraneMoveReq();
+        payload.setCraneId(craneId);
+        payload.setMoveType(DeviceStateEnum.valueOf(moveType));
+        payload.setDistance(distance);
+        payload.setSpeed(speed);
+
+        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_MOVE, payload);
+        event.addSubject("CRANE", craneId);
+        return event;
     }
 
-    private void createTruck(String id, double x, double y) {
-        Truck truck = new Truck(); truck.setId(id); truck.setType(DeviceTypeEnum.ELECTRIC_TRUCK); truck.setState(DeviceStateEnum.IDLE); truck.setPosX(x); truck.setPosY(y); truck.setPowerLevel(100.0); truck.setRemainingMoveTargets(new ArrayList<>());
-        GlobalContext.getInstance().getTruckMap().put(id, truck);
+    /**
+     * 创建吊机操作事件 (FETCH_DONE/PUT_DONE)
+     */
+    private SimEvent createCraneOperateEvent(long time, String craneId, String action, int durationMs) {
+        CraneOperationReq payload = new CraneOperationReq();
+        payload.setCraneId(craneId);
+        payload.setAction(EventTypeEnum.valueOf(action));
+        payload.setDurationMS(durationMs);
+
+        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_OP, payload);
+        event.addSubject("CRANE", craneId);
+        return event;
     }
 
-    private void createContainer(String id, String pos) {
-        Container container = new Container(); container.setContainerId(id); container.setCurrentPos(pos);
-        GlobalContext.getInstance().getContainerMap().put(id, container);
-    }
+    /**
+     * 创建指派任务事件
+     */
+    private SimEvent createAssignTaskEvent(long time, String deviceId, String wiRefNo) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("wiRefNo", wiRefNo);
 
-    private void createWi(String ref, String cid, BizTypeEnum biz, String fetch, String carry, String put, String from, String to) {
-        WorkInstruction wi = new WorkInstruction(); wi.setWiRefNo(ref); wi.setContainerId(cid); wi.setMoveKind(biz); wi.setFetchCheId(fetch); wi.setCarryCheId(carry); wi.setPutCheId(put); wi.setFromPos(from); wi.setToPos(to); wi.setWiStatus(WiStatusEnum.EXECUTING.getCode());
-        GlobalContext.getInstance().getWorkInstructionMap().put(ref, wi);
-    }
-
-    private void createCraneOperateEvent(long time, String id, String action, int duration) {
-        CraneOperationReq payload = new CraneOperationReq(); payload.setCraneId(id); payload.setAction(EventTypeEnum.valueOf(action)); payload.setDurationMS(duration);
-        engine.scheduleEvent(null, time, EventTypeEnum.CMD_CRANE_OP, payload).addSubject("CRANE", id);
-    }
-
-    private void createAssignTaskEvent(long time, String id, String wi) {
-        Map<String, Object> payload = new HashMap<>(); payload.put("wiRefNo", wi);
-        engine.scheduleEvent(null, time, EventTypeEnum.CMD_ASSIGN_TASK, payload).addSubject("DEVICE", id);
+        SimEvent event = engine.scheduleEvent(null, time, EventTypeEnum.CMD_ASSIGN_TASK, payload);
+        event.addSubject("DEVICE", deviceId);
+        return event;
     }
 }
