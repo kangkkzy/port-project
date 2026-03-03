@@ -37,7 +37,7 @@ export const useSimStore = defineStore('simulation', {
         isPlaying: false,
         playInterval: null as any,
         isPolling: false,
-        pollIntervalMs: 300,
+        pollIntervalMs: 500, // 增加到 500ms 保证网络不阻塞
         pollTimer: null as any,
         selectedDevice: null as any,
         mapPaths: [] as MapPath[],
@@ -55,16 +55,17 @@ export const useSimStore = defineStore('simulation', {
                 this.lastErrorSimTime = 0;
                 await this.loadMapPaths();
                 await this.updateSnapshot();
+                // 【修复】：初始化后必须重新启动轮询，否则画面彻底卡死不更新
+                this.startSnapshotPolling();
             } catch (error) {
                 console.error("初始化默认场景失败", error);
+                throw error;
             }
         },
 
         async updateSnapshot() {
             try {
-                // 使用 any 绕过 AxiosResponse 泛型限制
                 const res: any = await getSnapshot();
-                // 兼容拦截器：如果返回了后端 Result 对象，实际数据在 res.data 里
                 const data = res.data || res;
 
                 if (data) {
@@ -81,25 +82,35 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
+        // 【修复】：使用递归 setTimeout 替代 setInterval，防止并发请求堆积卡死 UI
+        async pollTick() {
+            if (!this.isPolling) return;
+            if (!this.isPlaying) {
+                try {
+                    await this.updateSnapshot();
+                    await this.fetchLogs();
+                } catch (e) {
+                    console.error("轮询异常", e);
+                }
+            }
+            if (this.isPolling) {
+                this.pollTimer = setTimeout(() => this.pollTick(), this.pollIntervalMs);
+            }
+        },
+
         startSnapshotPolling(intervalMs?: number) {
             if (this.isPolling) return;
             this.isPolling = true;
             if (typeof intervalMs === 'number' && intervalMs > 0) {
                 this.pollIntervalMs = intervalMs;
             }
-            this.pollTimer = setInterval(() => {
-                // 离散仿真：播放中由 tick 驱动刷新；此处仅在非播放状态下轮询同步
-                if (!this.isPlaying) {
-                    this.updateSnapshot();
-                    this.fetchLogs();
-                }
-            }, this.pollIntervalMs);
+            this.pollTick();
         },
 
         stopSnapshotPolling() {
             this.isPolling = false;
             if (this.pollTimer) {
-                clearInterval(this.pollTimer);
+                clearTimeout(this.pollTimer);
                 this.pollTimer = null;
             }
         },
@@ -134,12 +145,11 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
-        // 兼容旧调用名（组件里可能仍在使用）
         async doStepNext() {
             return this.doStep();
         },
 
-        async reset() {
+        async doReset() {
             try {
                 await resetSimulation();
                 this.stopAutoPlay();
@@ -149,26 +159,33 @@ export const useSimStore = defineStore('simulation', {
                 this.lastEventSimTime = 0;
                 this.lastErrorSimTime = 0;
                 await this.updateSnapshot();
+                // 【修复】：重置后重启轮询
+                this.startSnapshotPolling();
             } catch (error) {
                 console.error("重置系统失败", error);
+                throw error;
             }
         },
 
-        // 兼容旧调用名（组件里可能仍在使用）
-        async doReset() {
-            return this.reset();
+        // 【修复】：安全递归处理高频滴答动画
+        async playTick() {
+            if (!this.isPlaying) return;
+            try {
+                await tick(100);
+                await this.updateSnapshot();
+                await this.fetchLogs();
+            } catch (e) {
+                console.error("自动播放异常", e);
+            }
+            if (this.isPlaying) {
+                this.playInterval = setTimeout(() => this.playTick(), 100);
+            }
         },
 
         togglePlay() {
             this.isPlaying = !this.isPlaying;
             if (this.isPlaying) {
-                this.playInterval = setInterval(() => {
-                    // 以时间片推进，保证 MOVING/WORKING 状态能被前端采样到
-                    tick(100).then(() => {
-                        this.updateSnapshot();
-                        this.fetchLogs();
-                    });
-                }, 100);
+                this.playTick();
             } else {
                 this.stopAutoPlay();
             }
@@ -177,7 +194,7 @@ export const useSimStore = defineStore('simulation', {
         stopAutoPlay() {
             this.isPlaying = false;
             if (this.playInterval) {
-                clearInterval(this.playInterval);
+                clearTimeout(this.playInterval);
                 this.playInterval = null;
             }
         },
@@ -192,11 +209,8 @@ export const useSimStore = defineStore('simulation', {
 
         async loadMapPaths() {
             try {
-                // 修复 TS2740: 强制转换为 any 解析，并安全地提取 .data 属性
                 const res: any = await getMapPaths();
-                const paths = res.data || res || [];
-                this.mapPaths = paths;
-                console.log('地图路径配置已加载:', this.mapPaths);
+                this.mapPaths = res.data || res || [];
             } catch (error) {
                 console.error("加载地图配置失败", error);
             }
