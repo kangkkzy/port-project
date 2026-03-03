@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia';
-// 导入了 getEvents
-import { getSnapshot, stepNextEvent, resetSimulation, getEvents, getErrors, getAllErrors, getSuspendedChains, getMapPaths } from '../api/simulation';
+import {
+    getSnapshot,
+    stepNextEvent,
+    tick,
+    resetSimulation,
+    getEvents,
+    getErrors,
+    getAllErrors,
+    getSuspendedChains,
+    getMapPaths
+} from '../api/simulation';
 
 export interface MapPath {
     pathType: string;
@@ -19,6 +28,7 @@ export const useSimStore = defineStore('simulation', {
         chargingStations: [] as any[],
         vessels: [] as any[],
         workInstructions: [] as any[],
+        containers: [] as any[],
         events: [] as any[],
         errors: [] as any[],
         lastEventSimTime: 0,
@@ -26,105 +36,65 @@ export const useSimStore = defineStore('simulation', {
         isPlaying: false,
         playInterval: null as any,
         selectedDevice: null as any,
-        // 地图路径配置
         mapPaths: [] as MapPath[],
     }),
 
     actions: {
         async updateSnapshot() {
             try {
-                const data: any = await getSnapshot();
+                // 使用 any 绕过 AxiosResponse 泛型限制
+                const res: any = await getSnapshot();
+                // 兼容拦截器：如果返回了后端 Result 对象，实际数据在 res.data 里
+                const data = res.data || res;
+
                 if (data) {
-                    this.simTime = data.simTime;
+                    this.simTime = data.simTime || 0;
                     this.devices = data.devices || [];
                     this.fences = data.fences || [];
                     this.chargingStations = data.chargingStations || [];
                     this.vessels = data.vessels || [];
                     this.workInstructions = data.workInstructions || [];
+                    this.containers = data.containers || [];
                 }
-                // 每次拿完快照，顺便去拿一下最新的日志
-                await this.fetchLogs();
-                await this.fetchErrors();
             } catch (error) {
-                console.error("更新快照数据失败", error);
+                console.error("获取快照失败", error);
             }
         },
 
-        // 拉取并处理事件日志
         async fetchLogs() {
             try {
-                const logs: any = await getEvents(this.lastEventSimTime);
-                if (logs && logs.length > 0) {
-                    // 简单的去重逻辑
-                    const existingIds = new Set(this.events.map(e => e.eventId));
-                    const newLogs = logs.filter((e: any) => !existingIds.has(e.eventId));
-
-                    this.events.push(...newLogs);
-
-                    // 为了防止浏览器卡顿，最多只保留最新的 100 条日志
-                    if (this.events.length > 100) {
-                        this.events = this.events.slice(this.events.length - 100);
-                    }
-
-                    // 更新查询时间戳，下次只查这之后的
-                    const maxTime = Math.max(...logs.map((e: any) => e.simTime));
-                    this.lastEventSimTime = maxTime;
+                const eventRes: any = await getEvents(this.lastEventSimTime);
+                const eventData = eventRes.data || eventRes || [];
+                if (eventData.length > 0) {
+                    this.events.push(...eventData);
+                    this.lastEventSimTime = eventData[eventData.length - 1].simTime;
                 }
-            } catch (e) {
-                console.error("获取日志失败", e);
-            }
-        },
 
-        // 拉取错误日志
-        async fetchErrors() {
-            try {
-                const errors: any = await getErrors(this.lastErrorSimTime);
-                if (errors && errors.length > 0) {
-                    this.errors.push(...errors);
-                    const maxTime = Math.max(...errors.map((e: any) => e.simTime));
-                    this.lastErrorSimTime = maxTime;
+                const errorRes: any = await getErrors(this.lastErrorSimTime);
+                const errorData = errorRes.data || errorRes || [];
+                if (errorData.length > 0) {
+                    this.errors.push(...errorData);
+                    this.lastErrorSimTime = errorData[errorData.length - 1].simTime;
                 }
-            } catch (e) {
-                console.error("获取错误日志失败", e);
+            } catch (error) {
+                console.error("获取日志失败", error);
             }
         },
 
-        // 获取所有错误日志
-        async fetchAllErrors() {
-            try {
-                const errors: any = await getAllErrors();
-                this.errors = errors || [];
-                return errors;
-            } catch (e) {
-                console.error("获取所有错误日志失败", e);
-                return [];
-            }
-        },
-
-        // 获取暂停的事件链
-        async fetchSuspendedChains() {
-            try {
-                return await getSuspendedChains();
-            } catch (e) {
-                console.error("获取暂停事件链失败", e);
-                return null;
-            }
-        },
-
-        async doStepNext() {
+        async doStep() {
             try {
                 await stepNextEvent();
                 await this.updateSnapshot();
+                await this.fetchLogs();
             } catch (error) {
                 console.error("单步执行失败", error);
             }
         },
 
-        async doReset() {
+        async reset() {
             try {
                 await resetSimulation();
                 this.stopAutoPlay();
-                // 重置时清空日志
                 this.events = [];
                 this.errors = [];
                 this.lastEventSimTime = 0;
@@ -139,8 +109,12 @@ export const useSimStore = defineStore('simulation', {
             this.isPlaying = !this.isPlaying;
             if (this.isPlaying) {
                 this.playInterval = setInterval(() => {
-                    this.doStepNext();
-                }, 500);
+                    // 以时间片推进，保证 MOVING/WORKING 状态能被前端采样到
+                    tick(100).then(() => {
+                        this.updateSnapshot();
+                        this.fetchLogs();
+                    });
+                }, 100);
             } else {
                 this.stopAutoPlay();
             }
@@ -154,25 +128,23 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
-        // 设置选中的设备
         setSelectedDevice(device: any) {
             this.selectedDevice = device;
         },
 
-        // 清除选中的设备
         clearSelectedDevice() {
             this.selectedDevice = null;
         },
 
-        // 加载地图路径配置
         async loadMapPaths() {
             try {
-                const res = await getMapPaths();
-                const paths = res?.data || [];
+                // 修复 TS2740: 强制转换为 any 解析，并安全地提取 .data 属性
+                const res: any = await getMapPaths();
+                const paths = res.data || res || [];
                 this.mapPaths = paths;
-                console.log('地图路径配置已加载:', this.mapPaths.length, '条');
+                console.log('地图路径配置已加载:', this.mapPaths);
             } catch (error) {
-                console.error('加载地图路径配置失败', error);
+                console.error("加载地图配置失败", error);
             }
         }
     }

@@ -22,19 +22,10 @@
               <el-dropdown-item divided command="dsch">单环节：DSCH (卸船)</el-dropdown-item>
               <el-dropdown-item command="load">单环节：LOAD (装船)</el-dropdown-item>
               <el-dropdown-item command="dlvr">单环节：DLVR (外场提箱)</el-dropdown-item>
-              <!-- 以下按钮后端暂未实现，禁用处理 -->
-              <el-dropdown-item command="unavailable" disabled>
-                单环节：YARD_SHIFT (场内移箱) - 暂未实现
-              </el-dropdown-item>
-              <el-dropdown-item command="unavailable" disabled>
-                单环节：RECV (外场收箱) - 暂未实现
-              </el-dropdown-item>
-              <el-dropdown-item command="unavailable" disabled>
-                单环节：DIRECT_IN (直进船) - 暂未实现
-              </el-dropdown-item>
-              <el-dropdown-item command="unavailable" disabled>
-                单环节：DIRECT_OUT (直提) - 暂未实现
-              </el-dropdown-item>
+              <el-dropdown-item command="yard-shift">单环节：YARD_SHIFT (场内移箱)</el-dropdown-item>
+              <el-dropdown-item command="recv">单环节：RECV (外场收箱)</el-dropdown-item>
+              <el-dropdown-item command="direct-in">单环节：DIRECT_IN (直进船)</el-dropdown-item>
+              <el-dropdown-item command="direct-out">单环节：DIRECT_OUT (直提)</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -92,6 +83,22 @@
                   stroke: '#f57f17',
                   strokeWidth: 2,
                   cornerRadius: 3
+                }"
+              />
+
+              <!-- 集装箱（如果后端提供绝对坐标则可渲染） -->
+              <v-rect
+                  v-for="c in simStore.containers"
+                  :key="c.containerId"
+                  :config="{
+                  x: (c.posX || 0) - 6,
+                  y: (c.posY || 0) - 6,
+                  width: 12,
+                  height: 12,
+                  fill: '#ff7043',
+                  stroke: '#bf360c',
+                  strokeWidth: 1,
+                  cornerRadius: 2
                 }"
               />
 
@@ -298,7 +305,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
-import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading } from '../api/simulation'
+import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading, testYardShift, testRecv, testDirectIn, testDirectOut } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
@@ -686,17 +693,15 @@ const handleTestScenario = async (command: string) => {
       case 'dsch': res = await testTruckDelivery(); break;        // DSCH卸船 -> truck-delivery
       case 'load': res = await testQcLoading(); break;            // LOAD装船 -> qc-loading
       case 'dlvr': res = await testAscUnloading(); break;         // DLVR提箱 -> asc-unloading
-        // 以下case后端未实现，暂时不处理
-        // case 'yard-shift': res = await testYardShift(); break;
-        // case 'recv': res = await testRecv(); break;
-        // case 'direct-in': res = await testDirectIn(); break;
-        // case 'direct-out': res = await testDirectOut(); break;
+      case 'yard-shift': res = await testYardShift(); break;
+      case 'recv': res = await testRecv(); break;
+      case 'direct-in': res = await testDirectIn(); break;
+      case 'direct-out': res = await testDirectOut(); break;
       default: ElMessage.warning(`命令 ${command} 暂未实现`); return;
     }
 
-    // res 现在是完整响应对象，包含 msg 字段
     ElMessage.success({
-      message: res?.msg || `[${command}] 测试指令注入成功`,
+      message: typeof res === 'string' ? res : (res?.msg || `[${command}] 测试指令注入成功`),
       duration: 4000
     });
 

@@ -1,4 +1,4 @@
-import request from './request.ts';
+import request from './request';
 
 // ================= 状态查询 =================
 export const getSnapshot = () => request.get('/state/snapshot');
@@ -11,6 +11,7 @@ export const validatePosition = (deviceType: string, x: number, y: number) =>
 
 // ================= 指令控制 =================
 export const stepNextEvent = () => request.post('/command/step/next-event');
+export const tick = (deltaMs: number = 100) => request.post('/command/tick', { deltaMs });
 export const stepWithCommands = (data: any) => request.post('/command/stepWithCommands', data);
 
 // ================= 后台管理 =================
@@ -38,13 +39,10 @@ export const testQcLoading = () => request.post('/test/qc-loading');        // L
 export const testAscUnloading = () => request.post('/test/asc-unloading');  // DLVR 提箱
 export const testFullLoading = () => request.post('/test/full-loading');    // 完整装船流程
 
-// 以下接口后端未实现，暂不可用（调用会返回404）
-// 如需使用，请在后端 SimTestController.java 中实现对应方法
-// export const testYardShift = () => request.post('/test/yard-shift');    // YARD_SHIFT 移箱 - 后端未实现
-// export const testRecv = () => request.post('/test/recv');               // RECV 收箱 - 后端未实现
-// export const testDirectIn = () => request.post('/test/direct-in');      // DIRECT_IN 直进 - 后端未实现
-// export const testDirectOut = () => request.post('/test/direct-out');    // DIRECT_OUT 直提 - 后端未实现
-// export const testTaskChain = () => request.post('/test/task-chain');    // 多业务链路流转 - 后端未实现
+export const testYardShift = () => request.post('/test/yard-shift');        // YARD_SHIFT 移箱
+export const testRecv = () => request.post('/test/recv');                   // RECV 收箱
+export const testDirectIn = () => request.post('/test/direct-in');          // DIRECT_IN 直进
+export const testDirectOut = () => request.post('/test/direct-out');        // DIRECT_OUT 直提
 
 // ================= 健康检查 =================
 export const healthCheck = () => request.get('/health/ping');

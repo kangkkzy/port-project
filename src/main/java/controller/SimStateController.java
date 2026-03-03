@@ -1,6 +1,7 @@
 package controller;
 
 import common.Result;
+import common.consts.DeviceStateEnum;
 import engine.context.GlobalContext;
 import model.dto.snapshot.*;
 import model.entity.*;
@@ -54,22 +55,23 @@ public class SimStateController {
     private List<DeviceSnapshotDto> buildDeviceSnapshots(GlobalContext ctx) {
         List<DeviceSnapshotDto> allDevices = new ArrayList<>();
 
-        //  集卡 (Truck)
-        allDevices.addAll(mapToSnapshot(ctx.getTruckMap().values()));
+        // 集卡 (Truck) - 修复：传入 ctx 参数
+        allDevices.addAll(mapToSnapshot(ctx.getTruckMap().values(), ctx));
 
-        //  岸桥 (QC)
-        allDevices.addAll(mapToSnapshot(ctx.getQcMap().values()));
+        // 岸桥 (QC) - 修复：传入 ctx 参数
+        allDevices.addAll(mapToSnapshot(ctx.getQcMap().values(), ctx));
 
-        //  龙门吊 (ASC)
-        allDevices.addAll(mapToSnapshot(ctx.getAscMap().values()));
+        // 龙门吊 (ASC) - 修复：传入 ctx 参数
+        allDevices.addAll(mapToSnapshot(ctx.getAscMap().values(), ctx));
 
         return allDevices;
     }
 
     /**
      * 通用设备映射逻辑
+     * 修复：在方法签名中增加 GlobalContext ctx 参数
      */
-    private List<DeviceSnapshotDto> mapToSnapshot(Collection<? extends BaseDevice> devices) {
+    private List<DeviceSnapshotDto> mapToSnapshot(Collection<? extends BaseDevice> devices, GlobalContext ctx) {
         return devices.stream().map(device -> {
             DeviceSnapshotDto dto = new DeviceSnapshotDto();
 
@@ -77,11 +79,19 @@ public class SimStateController {
             dto.setId(device.getId());
             dto.setType(device.getType());
             dto.setState(device.getState());
-            dto.setPosX(device.getPosX());
-            dto.setPosY(device.getPosY());
+
+            // 移动中使用插值坐标（否则离散仿真只在 ARRIVAL 时更新坐标，前端看不到运动过程）
+            if (DeviceStateEnum.MOVING.equals(device.getState())) {
+                Point p = device.getInterpolatedPos(ctx.getSimTime());
+                dto.setPosX(p.getX());
+                dto.setPosY(p.getY());
+            } else {
+                dto.setPosX(device.getPosX());
+                dto.setPosY(device.getPosY());
+            }
             dto.setCurrWiRefNo(device.getCurrWiRefNo());
 
-            //  特有属性 (仅集卡
+            // 特有属性 (仅集卡)
             if (device instanceof Truck) {
                 Truck truck = (Truck) device;
                 dto.setPowerLevel(truck.getPowerLevel());
@@ -97,12 +107,10 @@ public class SimStateController {
             FenceSnapshotDto dto = new FenceSnapshotDto();
             dto.setNodeId(f.getNodeId());
             dto.setBlockCode(f.getBlockCode());
-            // 静态属性
             dto.setPosX(f.getPosX());
             dto.setPosY(f.getPosY());
             dto.setRadius(f.getRadius());
             dto.setSpeedLimit(f.getSpeedLimit());
-            // 动态状态 (是否阻塞 + 等待队列)
             dto.setStatus(f.getStatus());
             dto.setWaitingTrucks(f.getWaitingTrucks());
             return dto;
@@ -116,16 +124,12 @@ public class SimStateController {
             dto.setStatus(s.getStatus());
             dto.setPosX(s.getPosX());
             dto.setPosY(s.getPosY());
-            // 占用情况
             dto.setTruckId(s.getTruckId());
             dto.setChargeRate(s.getChargeRate());
             return dto;
         }).collect(Collectors.toList());
     }
 
-    /**
-     * 构建靠泊船舶快照
-     */
     private List<VesselSnapshotDto> buildVesselSnapshots(GlobalContext ctx) {
         return ctx.getVesselMap().values().stream().map(v -> {
             VesselSnapshotDto dto = new VesselSnapshotDto();
@@ -144,7 +148,6 @@ public class SimStateController {
             dto.setWiRefNo(wi.getWiRefNo());
             dto.setContainerId(wi.getContainerId());
             dto.setMoveKind(wi.getMoveKind());
-            // 起止点与状态流转
             dto.setFromPos(wi.getFromPos());
             dto.setToPos(wi.getToPos());
             dto.setWiStatus(wi.getWiStatus());
@@ -153,9 +156,6 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
-    /**
-     * 构建集装箱快照
-     */
     private List<ContainerSnapshotDto> buildContainerSnapshots(GlobalContext ctx) {
         return ctx.getContainerMap().values().stream().map(container -> {
             ContainerSnapshotDto dto = new ContainerSnapshotDto();

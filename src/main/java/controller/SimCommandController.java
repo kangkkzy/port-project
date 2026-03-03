@@ -1,6 +1,7 @@
 package controller;
 
 import common.Result;
+import engine.SimulationEngine;
 import model.dto.request.*;
 import model.dto.snapshot.*;
 import engine.context.GlobalContext;
@@ -20,9 +21,11 @@ import java.util.stream.Collectors;
 public class SimCommandController {
 
     private final ExternalAlgorithmApi algorithmApi;
+    private final SimulationEngine engine;
     @Autowired
-    public SimCommandController(ExternalAlgorithmApi algorithmApi) {
+    public SimCommandController(ExternalAlgorithmApi algorithmApi, SimulationEngine engine) {
         this.algorithmApi = algorithmApi;
+        this.engine = engine;
     }
 
     //  移动控制 集卡/桥吊/龙门吊
@@ -76,11 +79,41 @@ public class SimCommandController {
     }
 
     /**
+     * 按时间片推进：推进 simTime 一小段，并处理这段时间内到期的事件
+     * 用于前端动画：让 simTime 连续增长，而不是只跳到下一个事件点
+     */
+    @PostMapping("/tick")
+    public Result tick(@RequestBody TickReq req) {
+        long deltaMs = (req != null) ? req.getDeltaMs() : 0L;
+        if (deltaMs <= 0) deltaMs = 100L;
+
+        synchronized (engine) {
+            synchronized (GlobalContext.getInstance()) {
+                GlobalContext ctx = GlobalContext.getInstance();
+                engine.runUntil(ctx.getSimTime() + deltaMs);
+                return Result.success("已推进", ctx.getSimTime());
+            }
+        }
+    }
+
+    /**
      * 取消事件
      */
     @PostMapping("/event/cancel")
     public Result cancelEvent(@RequestBody model.dto.request.CancelEventReq req) {
         return algorithmApi.cancelEvent(req.getEventId());
+    }
+
+    public static class TickReq {
+        private long deltaMs;
+
+        public long getDeltaMs() {
+            return deltaMs;
+        }
+
+        public void setDeltaMs(long deltaMs) {
+            this.deltaMs = deltaMs;
+        }
     }
 
     /**
