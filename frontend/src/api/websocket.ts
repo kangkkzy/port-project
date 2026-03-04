@@ -1,12 +1,14 @@
 import { ref } from 'vue';
 import { useSimStore } from '../stores/simStore';
+import SockJS from 'sockjs-client/dist/sockjs';
+import { Client } from '@stomp/stompjs';
 
 /**
  * WebSocket 服务：订阅 /topic/sim-events，接收后端推送的实时仿真事件。
  * 前端根据事件类型更新设备状态，并驱动动画。
  */
 class SimulationWebSocketService {
-    private client: any = null;
+    private client: Client | null = null;
     private connected = ref(false);
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
@@ -22,33 +24,30 @@ class SimulationWebSocketService {
             return;
         }
 
-        // 动态导入 sockjs-client 和 stompjs（需在项目中安装）
-        import('sockjs-client').then((SockJS) => {
-            import('stompjs').then((STOMP) => {
-                const socket = new SockJS.default('/ws-sim');
-                this.client = STOMP.over(socket);
-
-                this.client.connect(
-                    {},
-                    (frame: any) => {
-                        console.log('[WS] 已连接:', frame);
-                        this.connected.value = true;
-                        this.reconnectAttempts = 0;
-
-                        // 订阅仿真事件主题
-                        this.client.subscribe('/topic/sim-events', (message: any) => {
-                            this.handleMessage(message);
-                        });
-                    },
-                    (error: any) => {
-                        console.error('[WS] 连接失败:', error);
-                        this.handleDisconnect();
-                    }
-                );
-            });
-        }).catch((err) => {
-            console.error('[WS] 加载 sockjs-client/stompjs 失败:', err);
+        this.client = new Client({
+            webSocketFactory: () => new SockJS('http://localhost:8080/ws-sim'),
+            reconnectDelay: 5000,
+            heartbeatIncoming: 4000,
+            heartbeatOutgoing: 4000,
         });
+
+        this.client.onConnect = () => {
+            console.log('[WS] 已连接');
+            this.connected.value = true;
+            this.reconnectAttempts = 0;
+
+            // 订阅仿真事件主题
+            this.client?.subscribe('/topic/sim-events', (message) => {
+                this.handleMessage(message);
+            });
+        };
+
+        this.client.onStompError = (frame) => {
+            console.error('[WS] 连接失败:', frame);
+            this.handleDisconnect();
+        };
+
+        this.client.activate();
     }
 
     /**
@@ -60,7 +59,7 @@ class SimulationWebSocketService {
             console.log('[WS] 收到事件:', payload);
 
             const simStore = useSimStore();
-            const { eventType, deviceId, targetPosX, targetPosY, durationMs, errorMessage } = payload;
+            const { eventType, deviceId, targetPosX, targetPosY, durationMs, message: errorMessage } = payload;
 
             if (eventType === 'SIM_ERROR_EVENT') {
                 // 业务约束错误事件，推送到控制台并触发视觉告警
@@ -104,7 +103,7 @@ class SimulationWebSocketService {
      */
     disconnect() {
         if (this.client) {
-            this.client.disconnect();
+            this.client.deactivate();
             this.client = null;
             this.connected.value = false;
             console.log('[WS] 已断开连接');

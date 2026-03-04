@@ -312,6 +312,16 @@
       </el-form>
       <template #footer><el-button @click="showChargeDialog = false">取消</el-button><el-button type="primary" @click="handleCharge" :disabled="!chargeStationId">确认充电</el-button></template>
     </el-dialog>
+
+    <div class="log-console" style="position: absolute; right: 20px; top: 20px; width: 300px; background: rgba(0,0,0,0.8); color: #fff; padding: 10px; border-radius: 8px; z-index: 999; max-height: 400px; overflow-y: auto;">
+      <h3 style="margin-top: 0; color: #ffeb3b; border-bottom: 1px solid #666; padding-bottom: 5px;">⚠️ 仿真逻辑拦截台</h3>
+      <div v-if="simStore.eventLogs.length === 0" style="color: #aaa; font-size: 12px;">暂无拦截记录...</div>
+      <div v-for="(log, index) in simStore.eventLogs" :key="index" style="margin-bottom: 8px; font-size: 13px; line-height: 1.4;">
+        <span style="color: #ff5722;">[{{ log.simTime }}]</span>
+        <span style="color: #03a9f4; font-weight: bold; margin-left: 5px;">{{ log.deviceId }}</span>
+        <div style="color: #ff8a80; margin-top: 2px;">✖ {{ log.message }}</div>
+      </div>
+    </div>
   </div>
 </template>
 

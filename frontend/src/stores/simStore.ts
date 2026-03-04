@@ -56,15 +56,14 @@ export const useSimStore = defineStore('simulation', {
         isPlaying: false,
         playInterval: null as any,
         isPolling: false,
-        pollIntervalMs: 500, // 增加到 500ms 保证网络不阻塞
+        pollIntervalMs: 500,
         pollTimer: null as any,
         selectedDevice: null as any,
         mapPaths: [] as MapPath[],
         transferZones: [] as TransferZone[],
-        /** 设备动画状态 Map：deviceId -> 动画参数 */
         deviceAnimations: new Map<string, DeviceAnimationState>(),
-        /** 设备告警状态 Map：deviceId -> 告警结束时间戳 */
         deviceAlerts: new Map<string, number>(),
+        eventLogs: [] as any[],
     }),
 
     actions: {
@@ -292,7 +291,17 @@ export const useSimStore = defineStore('simulation', {
         onSimulationError(deviceId: string | null, errorMessage: string) {
             console.error(`[Store] 仿真错误: device=${deviceId}, error=${errorMessage}`);
 
-            // 添加到错误日志
+            // 添加到 eventLogs（用于前端控制台显示）
+            this.eventLogs.unshift({
+                eventId: 'ERR_' + Date.now(),
+                simTime: this.simTime,
+                deviceId: deviceId,
+                message: errorMessage,
+                eventType: 'SIM_ERROR_EVENT'
+            });
+            if (this.eventLogs.length > 50) this.eventLogs.pop();
+
+            // 添加到 errors（用于原有错误显示）
             this.errors.push({
                 eventId: 'ERR_' + Date.now(),
                 simTime: this.simTime,
