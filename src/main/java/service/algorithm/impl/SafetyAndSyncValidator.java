@@ -33,8 +33,12 @@ public class SafetyAndSyncValidator implements WorkInstructionValidator {
     }
 
     @Override
-    public void validate(WorkInstruction wi, AssignTaskReq req) {
-        if (wi == null || req == null || req.getDeviceType() == null) {
+    public void validate(AssignTaskReq req, GlobalContext context) {
+        if (req == null || req.getDeviceType() == null) {
+            return;
+        }
+        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
+        if (wi == null) {
             return;
         }
         // 仅对岸桥设备生效

@@ -2,6 +2,7 @@ package service.algorithm.impl;
 
 import common.exception.BusinessException;
 import common.util.BizTypeUtil;
+import engine.context.GlobalContext;
 import model.dto.request.AssignTaskReq;
 import model.entity.WorkInstruction;
 import org.springframework.stereotype.Component;
@@ -14,7 +15,8 @@ import service.algorithm.WorkInstructionValidator;
 public class DeviceBindingValidator implements WorkInstructionValidator {
 
     @Override
-    public void validate(WorkInstruction wi, AssignTaskReq req) {
+    public void validate(AssignTaskReq req, GlobalContext context) {
+        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
         if (wi == null || wi.getMoveKind() == null) {
             return;
         }

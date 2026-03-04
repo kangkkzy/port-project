@@ -1,70 +1,47 @@
 package service.algorithm.impl;
 
-import common.consts.BizTypeEnum;
 import common.consts.PositionType;
 import common.exception.BusinessException;
-import common.util.VesselStowageMock;
-import common.util.YardStowageMock;
 import engine.context.GlobalContext;
-import engine.websocket.SimulationEventWebSocketService;
 import model.dto.request.AssignTaskReq;
+import model.entity.YardBlock;
 import model.entity.WorkInstruction;
-import org.springframework.stereotype.Component;
 import service.algorithm.WorkInstructionValidator;
+import org.springframework.stereotype.Component;
 
-/**
- * 舱位/堆场堆叠与作业顺序校验
- * 只关心 from/to 与 moveKind，不依赖设备状态。
- */
 @Component
 public class StowageValidator implements WorkInstructionValidator {
 
-    private final VesselStowageMock vesselMock = VesselStowageMock.getInstance();
-    private final YardStowageMock yardMock = YardStowageMock.getInstance();
-    private final GlobalContext context = GlobalContext.getInstance();
-    private final SimulationEventWebSocketService webSocketService;
-
-    public StowageValidator(SimulationEventWebSocketService webSocketService) {
-        this.webSocketService = webSocketService;
-    }
-
     @Override
-    public void validate(WorkInstruction wi, AssignTaskReq req) {
-        if (wi == null || wi.getMoveKind() == null) {
-            return;
+    public void validate(AssignTaskReq req, GlobalContext context) {
+        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
+        if (wi == null) return;
+
+        // 真实堆场提箱阻挡校验
+        if (PositionType.fromCode(wi.getFromPos()) == PositionType.YARD) {
+            checkYardFetch(wi.getFromPos(), context);
         }
-        checkStowage(wi);
     }
 
-    private void checkStowage(WorkInstruction wi) {
-        String from = wi.getFromPos();
-        String to = wi.getToPos();
-        BizTypeEnum type = wi.getMoveKind();
+    private void checkYardFetch(String posCode, GlobalContext context) {
+        // 假设 posCode 格式为 "YARD_A_01_02_03" (堆区_Bay_Row_Tier)
+        String[] parts = posCode.split("_");
+        if (parts.length >= 5) {
+            String blockId = parts[0] + "_" + parts[1]; // "YARD_A"
+            int bay = Integer.parseInt(parts[2]) - 1;
+            int row = Integer.parseInt(parts[3]) - 1;
+            int tier = Integer.parseInt(parts[4]) - 1;
 
-        PositionType fromType = PositionType.fromCode(from);
-        PositionType toType = PositionType.fromCode(to);
-
-        if (type == BizTypeEnum.LOAD) {
-            if (fromType.isYard() && !yardMock.isFetchAllowed(from)) {
-                webSocketService.broadcastError(null, "堆场提箱受阻: " + from, context.getSimTime());
-                throw new BusinessException("堆场提箱受阻: " + from);
-            }
-            if (toType.isVessel() && !vesselMock.isLoadAllowed(to)) {
-                webSocketService.broadcastError(null, "装船顺序错误: " + to, context.getSimTime());
-                throw new BusinessException("装船顺序错误: " + to);
-            }
-        } else if (type == BizTypeEnum.DSCH) {
-            if (fromType.isVessel() && !vesselMock.isDischargeAllowed(from)) {
-                webSocketService.broadcastError(null, "卸船顺序错误: " + from, context.getSimTime());
-                throw new BusinessException("卸船顺序错误: " + from);
-            }
-            if (toType.isYard() && !yardMock.isPutAllowed(to)) {
-                webSocketService.broadcastError(null, "堆场落箱受阻: " + to, context.getSimTime());
-                throw new BusinessException("堆场落箱受阻: " + to);
+            YardBlock block = context.getYardBlockMap().get(blockId);
+            if (block != null && tier < 4) { // 检查上方 (tier+1) 是否有箱子
+                if (block.getContainer(bay, row, tier + 1) != null) {
+                    throw new BusinessException("堆场提箱受阻: " + posCode + " 上方有集装箱遮挡");
+                }
             }
         }
     }
 }
+
 
 
 

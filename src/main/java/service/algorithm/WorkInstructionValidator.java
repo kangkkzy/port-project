@@ -2,6 +2,7 @@ package service.algorithm;
 
 import model.dto.request.AssignTaskReq;
 import model.entity.WorkInstruction;
+import engine.context.GlobalContext;
 
 /**
  * 作业指令校验扩展点
@@ -11,7 +12,9 @@ public interface WorkInstructionValidator {
 
     /**
      * 对 WI 与当前任务请求进行校验，不通过时直接抛出 BusinessException。
+     * @param req 任务请求
+     * @param context 全局上下文
      */
-    void validate(WorkInstruction wi, AssignTaskReq req);
+    void validate(AssignTaskReq req, GlobalContext context);
 }
 
