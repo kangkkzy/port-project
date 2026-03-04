@@ -164,7 +164,8 @@ public class ScenarioLoaderService {
     }
 
     private static DeviceStateEnum parseDeviceState(String state) {
-        if (state == null || state.isBlank()) return DeviceStateEnum.IDLE;
+        // 修复 isBlank 报错，兼容 Java 8
+        if (state == null || state.trim().isEmpty()) return DeviceStateEnum.IDLE;
         try {
             return DeviceStateEnum.valueOf(state.trim());
         } catch (IllegalArgumentException ignored) {
@@ -174,7 +175,8 @@ public class ScenarioLoaderService {
     }
 
     private static DeviceTypeEnum parseDeviceType(String type, DeviceTypeEnum defaultType) {
-        if (type == null || type.isBlank()) return defaultType;
+        // 修复 isBlank 报错，兼容 Java 8
+        if (type == null || type.trim().isEmpty()) return defaultType;
         try {
             return DeviceTypeEnum.valueOf(type.trim());
         } catch (IllegalArgumentException e) {
@@ -183,7 +185,8 @@ public class ScenarioLoaderService {
     }
 
     private static BizTypeEnum parseBizType(String moveKind) {
-        if (moveKind == null || moveKind.isBlank()) {
+        // 修复 isBlank 报错，兼容 Java 8
+        if (moveKind == null || moveKind.trim().isEmpty()) {
             throw new IllegalArgumentException("workInstructions[].moveKind 不能为空");
         }
         try {
