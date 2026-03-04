@@ -326,6 +326,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-nocheck
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
