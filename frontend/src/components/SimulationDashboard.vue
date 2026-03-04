@@ -4,6 +4,7 @@
       <h2>港口离散仿真系统</h2>
       <div class="buttons">
         <el-button type="info" @click="handleInitScene" :loading="isInitLoading">一键加载场景</el-button>
+        <el-button type="warning" @click="handleDispatchTasks">模拟算法下发任务</el-button>
         <el-button type="primary" @click="handleStep">单步执行 (Next)</el-button>
         <el-button type="success" @click="handleTogglePlay">
           {{ simStore.isPlaying ? '暂停播放' : '自动播放' }}
@@ -567,6 +568,17 @@ const handleInitScene = async () => {
 const handleStep = () => { simStore.doStepNext() }
 const handleTogglePlay = () => { simStore.togglePlay() }
 const handleReset = async () => { await simStore.doReset() }
+
+const handleDispatchTasks = async () => {
+  try {
+    // 这里的 request 假定为全局注入的 HTTP 客户端（例如 axios 封装）
+    const res: any = await (window as any).request.post('/sim/test/dispatch-all');
+    ElMessage.success(res.data?.message || res.message || '任务派发成功，请观察控制台与沙盘');
+  } catch (error: any) {
+    const msg = error?.response?.data?.message || error?.message || '任务派发失败';
+    ElMessage.error(msg);
+  }
+};
 
 const handleTestScenario = async (command: string) => {
   isTestLoading.value = true;

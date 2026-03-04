@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useSimStore } from '../stores/simStore';
 // @ts-ignore
-import SockJS from 'sockjs-client/dist/sockjs';
+import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 
 /**

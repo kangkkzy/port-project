@@ -153,6 +153,7 @@ public class ScenarioLoaderService {
     private WorkInstruction toWorkInstruction(ScenarioFileDto.WorkInstructionEntryDto dto) {
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo(dto.getWiRefNo());
+        wi.setStatus(common.consts.WiStatusEnum.CREATED);
         wi.setMoveKind(parseBizType(dto.getMoveKind()));
         wi.setFetchCheId(dto.getFetchCheId());
         wi.setCarryCheId(dto.getCarryCheId());
