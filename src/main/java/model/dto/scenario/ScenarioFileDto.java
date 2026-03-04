@@ -1,21 +1,56 @@
 package model.dto.scenario;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
-
-import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 场景 JSON 文件根结构（数据驱动）
- */
 @Data
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class ScenarioFileDto {
-    private String description;
-    private List<InitTruckDto> initTrucks = new ArrayList<>();
-    private List<InitQcDto> initQcs = new ArrayList<>();
-    private List<InitAscDto> initAscs = new ArrayList<>();
-    private List<InitContainerDto> initContainers = new ArrayList<>();
-    private List<WorkInstructionEntryDto> workInstructions = new ArrayList<>();
+    private List<InitTruckDto> initTrucks;
+    private List<InitQcDto> initQcs;
+    private List<InitAscDto> initAscs;
+    private List<InitContainerDto> initContainers;
+    private List<WorkInstructionEntryDto> workInstructions;
+
+    @Data
+    public static class InitTruckDto {
+        private String id;
+        private String type;
+        private Double posX;
+        private Double posY;
+        private String state;
+    }
+
+    @Data
+    public static class InitQcDto {
+        private String id;
+        private Double posX;
+        private Double posY;
+        private String state;
+    }
+
+    @Data
+    public static class InitAscDto {
+        private String id;
+        private Double posX;
+        private Double posY;
+        private String state;
+    }
+
+    @Data
+    public static class InitContainerDto {
+        private String containerId;
+        private String currentPos;
+    }
+
+    @Data
+    public static class WorkInstructionEntryDto {
+        private String wiRefNo;
+        private String moveKind;
+        private String fetchCheId;
+        private String carryCheId;
+        private String putCheId;
+        private String fromPos;
+        private String toPos;
+        private String containerId;
+    }
 }

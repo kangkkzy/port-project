@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.List;
 
 /**
  * 场景加载服务：解析 scenario JSON，清理并重新填充 GlobalContext 中的设备、箱子、指令。
@@ -70,35 +69,35 @@ public class ScenarioLoaderService {
         int trucks = 0, qcs = 0, ascs = 0, containers = 0, wis = 0;
 
         if (dto.getInitTrucks() != null) {
-            for (InitTruckDto t : dto.getInitTrucks()) {
+            for (ScenarioFileDto.InitTruckDto t : dto.getInitTrucks()) {
                 Truck entity = toTruck(t);
                 ctx.getTruckMap().put(entity.getId(), entity);
                 trucks++;
             }
         }
         if (dto.getInitQcs() != null) {
-            for (InitQcDto q : dto.getInitQcs()) {
+            for (ScenarioFileDto.InitQcDto q : dto.getInitQcs()) {
                 QcDevice entity = toQc(q);
                 ctx.getQcMap().put(entity.getId(), entity);
                 qcs++;
             }
         }
         if (dto.getInitAscs() != null) {
-            for (InitAscDto a : dto.getInitAscs()) {
+            for (ScenarioFileDto.InitAscDto a : dto.getInitAscs()) {
                 AscDevice entity = toAsc(a);
                 ctx.getAscMap().put(entity.getId(), entity);
                 ascs++;
             }
         }
         if (dto.getInitContainers() != null) {
-            for (InitContainerDto c : dto.getInitContainers()) {
+            for (ScenarioFileDto.InitContainerDto c : dto.getInitContainers()) {
                 Container entity = toContainer(c);
                 ctx.getContainerMap().put(entity.getContainerId(), entity);
                 containers++;
             }
         }
         if (dto.getWorkInstructions() != null) {
-            for (WorkInstructionEntryDto w : dto.getWorkInstructions()) {
+            for (ScenarioFileDto.WorkInstructionEntryDto w : dto.getWorkInstructions()) {
                 WorkInstruction entity = toWorkInstruction(w);
                 ctx.getWorkInstructionMap().put(entity.getWiRefNo(), entity);
                 wis++;
@@ -110,7 +109,7 @@ public class ScenarioLoaderService {
         return new LoadResult(trucks, qcs, ascs, containers, wis);
     }
 
-    private Truck toTruck(InitTruckDto dto) {
+    private Truck toTruck(ScenarioFileDto.InitTruckDto dto) {
         Truck t = new Truck();
         t.setId(dto.getId());
         t.setType(parseDeviceType(dto.getType(), DeviceTypeEnum.ELECTRIC_TRUCK));
@@ -122,7 +121,7 @@ public class ScenarioLoaderService {
         return t;
     }
 
-    private QcDevice toQc(InitQcDto dto) {
+    private QcDevice toQc(ScenarioFileDto.InitQcDto dto) {
         QcDevice q = new QcDevice();
         q.setId(dto.getId());
         q.setType(DeviceTypeEnum.QC);
@@ -133,7 +132,7 @@ public class ScenarioLoaderService {
         return q;
     }
 
-    private AscDevice toAsc(InitAscDto dto) {
+    private AscDevice toAsc(ScenarioFileDto.InitAscDto dto) {
         AscDevice a = new AscDevice();
         a.setId(dto.getId());
         a.setType(DeviceTypeEnum.ASC);
@@ -144,14 +143,14 @@ public class ScenarioLoaderService {
         return a;
     }
 
-    private Container toContainer(InitContainerDto dto) {
+    private Container toContainer(ScenarioFileDto.InitContainerDto dto) {
         Container c = new Container();
         c.setContainerId(dto.getContainerId());
         c.setCurrentPos(dto.getCurrentPos());
         return c;
     }
 
-    private WorkInstruction toWorkInstruction(WorkInstructionEntryDto dto) {
+    private WorkInstruction toWorkInstruction(ScenarioFileDto.WorkInstructionEntryDto dto) {
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo(dto.getWiRefNo());
         wi.setMoveKind(parseBizType(dto.getMoveKind()));
@@ -207,4 +206,3 @@ public class ScenarioLoaderService {
         private final int workInstructions;
     }
 }
-
