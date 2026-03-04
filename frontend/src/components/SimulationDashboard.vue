@@ -303,6 +303,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import { useSimStore } from '../stores/simStore'
+import { wsService } from '../api/websocket'
 import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, testTruckDelivery, testQcLoading, testAscUnloading, testFullLoading, testYardShift, testRecv, testDirectIn, testDirectOut, testQcHorizontalVertical, testAscHorizontalVertical } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
@@ -353,19 +354,38 @@ watch(() => simStore.events.length, async () => {
 })
 
 const animateLoop = () => {
+  const now = Date.now();
   simStore.devices.forEach(target => {
     if (!displayDevices.value[target.id]) {
       displayDevices.value[target.id] = { ...target };
     } else {
       const curr = displayDevices.value[target.id];
-      const dx = target.posX - curr.posX;
-      const dy = target.posY - curr.posY;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-        curr.posX = target.posX;
-        curr.posY = target.posY;
+      const animation = simStore.deviceAnimations.get(target.id);
+
+      if (animation && animation.durationMs > 0) {
+        // 使用 WebSocket 推送的 durationMs 进行精确动画
+        const elapsed = now - animation.startTime;
+        const progress = Math.min(elapsed / animation.durationMs, 1);
+        // 线性插值
+        const startX = curr.posX;
+        const startY = curr.posY;
+        curr.posX = startX + (animation.targetPosX - startX) * progress;
+        curr.posY = startY + (animation.targetPosY - startY) * progress;
+        // 动画结束，清除动画状态
+        if (progress >= 1) {
+          simStore.deviceAnimations.delete(target.id);
+        }
       } else {
-        curr.posX += dx * 0.08;
-        curr.posY += dy * 0.08;
+        // 降级平滑插值（轮询模式）
+        const dx = target.posX - curr.posX;
+        const dy = target.posY - curr.posY;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+          curr.posX = target.posX;
+          curr.posY = target.posY;
+        } else {
+          curr.posX += dx * 0.08;
+          curr.posY += dy * 0.08;
+        }
       }
       curr.state = target.state;
       curr.type = target.type;
@@ -380,12 +400,16 @@ onMounted(() => {
   simStore.loadTransferZones()
   simStore.startSnapshotPolling(500)
   animateLoop()
+  // 连接 WebSocket，接收实时事件推送
+  wsService.connect()
 })
 
 onBeforeUnmount(() => {
   simStore.stopAutoPlay()
   simStore.stopSnapshotPolling()
   if (animFrameId) cancelAnimationFrame(animFrameId)
+  // 断开 WebSocket
+  wsService.disconnect()
 })
 
 const getDeviceColor = (type: string) => {

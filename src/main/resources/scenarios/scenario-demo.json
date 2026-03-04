@@ -1,0 +1,56 @@
+{
+  "description": "演示场景：完整卸船业务流 (DSCH) + 初始设备与集装箱",
+  "initTrucks": [
+    {
+      "id": "TRUCK_01",
+      "posX": 150.0,
+      "posY": 150.0,
+      "state": "IDLE",
+      "type": "ELECTRIC_TRUCK"
+    }
+  ],
+  "initQcs": [
+    {
+      "id": "QC_01",
+      "posX": 150.0,
+      "posY": 120.0,
+      "state": "IDLE"
+    }
+  ],
+  "initAscs": [
+    {
+      "id": "ASC_01",
+      "posX": 175.0,
+      "posY": 230.0,
+      "state": "IDLE"
+    }
+  ],
+  "initContainers": [
+    {
+      "containerId": "CONT_DSCH_01",
+      "currentPos": "BAY_01"
+    },
+    {
+      "containerId": "CONT_YARD_01",
+      "currentPos": "YARD_A"
+    }
+  ],
+  "workInstructions": [
+    {
+      "wiRefNo": "WI_QC_DSCH",
+      "moveKind": "DSCH",
+      "fetchCheId": "QC_01",
+      "carryCheId": "TRUCK_01",
+      "fromPos": "BAY_01",
+      "toPos": "TRUCK_01"
+    },
+    {
+      "wiRefNo": "WI_ASC_DSCH",
+      "moveKind": "DSCH",
+      "fetchCheId": "ASC_01",
+      "carryCheId": "TRUCK_01",
+      "fromPos": "TRUCK_01",
+      "toPos": "YARD_A"
+    }
+  ]
+}

@@ -3,9 +3,12 @@ package engine;
 import common.config.PhysicsConfig;
 import common.consts.EventTypeEnum;
 import common.exception.SimulationDeadLoopException;
+import engine.context.GlobalContext;
+import engine.log.SimulationEventLog;
+import engine.log.SimulationErrorLog;
+import engine.websocket.SimulationEventWebSocketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import engine.context.GlobalContext;
 import model.dto.snapshot.EventLogEntryDto;
 import model.entity.BaseDevice;
 import model.entity.WorkInstruction;
@@ -17,9 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
-
-import engine.log.SimulationEventLog;
-import engine.log.SimulationErrorLog;
 
 /**
  * 仿真引擎核心
@@ -34,6 +34,7 @@ public class SimulationEngine implements InitializingBean {
     private final PhysicsConfig physicsConfig;
     private final SimulationEventLog eventLog;
     private final SimulationErrorLog errorLog;
+    private final SimulationEventWebSocketService webSocketService;
     private final GlobalContext context = GlobalContext.getInstance();
 
     // 数据结构
@@ -294,6 +295,8 @@ public class SimulationEngine implements InitializingBean {
         if (handler != null) {
             try {
                 handler.handle(nextEvent, this, context);
+                // 广播核心物理事件（MOVE_START, ARRIVAL, FETCH_DONE, PUT_DONE）
+                broadcastEvent(nextEvent);
             } catch (Exception e) {
                 String errorMsg = String.format("事件处理异常，触发熔断: Type=%s, Id=%s, Time=%d, Error=%s",
                         nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime(), e.getMessage());
@@ -364,5 +367,46 @@ public class SimulationEngine implements InitializingBean {
         if (!globalSuspended && eventQueue.isEmpty() && targetSimTime > currentTime) {
             context.setSimTime(targetSimTime);
         }
+    }
+
+    /**
+     * 广播核心物理事件到 WebSocket 客户端。
+     * 计算事件耗时 durationMs，用于前端动画。
+     */
+    private void broadcastEvent(SimEvent event) {
+        if (webSocketService == null) return;
+
+        long durationMs = 0;
+        Object data = event.getData();
+        EventTypeEnum type = event.getType();
+
+        if (type == EventTypeEnum.MOVE_START) {
+            // 从设备当前速度和目标点计算耗时
+            String deviceId = event.getPrimaryDeviceId();
+            if (deviceId != null) {
+                BaseDevice device = context.getDevice(deviceId);
+                if (device != null && device.getSpeed() != null && device.getCurrentTargetPos() != null) {
+                    double dx = device.getCurrentTargetPos().getX() - device.getPosX();
+                    double dy = device.getCurrentTargetPos().getY() - device.getPosY();
+                    double dist = Math.hypot(dx, dy);
+                    durationMs = (long) ((dist / device.getSpeed()) * 1000);
+                }
+            }
+        } else if (type == EventTypeEnum.ARRIVAL) {
+            // ARRIVAL 事件的耗时已经在 MOVE_START 时计算过，这里设为0表示立即到达
+            durationMs = 0;
+        } else if (type == EventTypeEnum.FETCH_DONE || type == EventTypeEnum.PUT_DONE) {
+            // 抓/落箱耗时从 payload 获取
+            if (data instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> payload = (Map<String, Object>) data;
+                Object durationObj = payload.get("durationMS");
+                if (durationObj instanceof Number) {
+                    durationMs = ((Number) durationObj).longValue();
+                }
+            }
+        }
+
+        webSocketService.broadcast(event, durationMs);
     }
 }

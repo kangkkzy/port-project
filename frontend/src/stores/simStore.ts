@@ -32,6 +32,14 @@ export interface TransferZone {
     yRange: number[];
 }
 
+/** 设备动画状态 */
+export interface DeviceAnimationState {
+    targetPosX: number;
+    targetPosY: number;
+    durationMs: number;
+    startTime: number;
+}
+
 export const useSimStore = defineStore('simulation', {
     state: () => ({
         simTime: 0,
@@ -53,6 +61,8 @@ export const useSimStore = defineStore('simulation', {
         selectedDevice: null as any,
         mapPaths: [] as MapPath[],
         transferZones: [] as TransferZone[],
+        /** 设备动画状态 Map：deviceId -> 动画参数 */
+        deviceAnimations: new Map<string, DeviceAnimationState>(),
     }),
 
     actions: {
@@ -235,6 +245,40 @@ export const useSimStore = defineStore('simulation', {
             } catch (error) {
                 console.error("加载交接区域配置失败", error);
             }
+        },
+
+        /** WebSocket 推送事件处理：更新设备目标坐标，触发动画 */
+        updateDeviceTarget(deviceId: string, targetPosX: number, targetPosY: number, durationMs: number) {
+            const device = this.devices.find((d: any) => d.id === deviceId);
+            if (device) {
+                // 保存动画参数：目标坐标和持续时间
+                this.deviceAnimations.set(deviceId, {
+                    targetPosX,
+                    targetPosY,
+                    durationMs,
+                    startTime: Date.now(),
+                });
+                // 乐观更新：直接设置目标位置，前端组件用 CSS transition 或 requestAnimationFrame 补间
+                device.targetPosX = targetPosX;
+                device.targetPosY = targetPosY;
+            }
+        },
+
+        /** WebSocket 推送事件处理：设备到达，更新实际坐标 */
+        updateDevicePosition(deviceId: string, posX: number, posY: number) {
+            const device = this.devices.find((d: any) => d.id === deviceId);
+            if (device) {
+                device.posX = posX;
+                device.posY = posY;
+                // 清除动画状态
+                this.deviceAnimations.delete(deviceId);
+            }
+        },
+
+        /** WebSocket 推送事件处理：抓/落箱完成 */
+        onContainerOperation(deviceId: string, eventType: string) {
+            console.log(`[Store] 设备 ${deviceId} 完成 ${eventType}`);
+            // 可选：刷新 containers 或 workInstructions
         }
     }
 });
