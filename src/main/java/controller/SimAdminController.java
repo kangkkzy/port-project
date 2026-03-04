@@ -54,12 +54,12 @@ public class SimAdminController {
      */
     @PostMapping("/status")
     public Result getStatus() {
-        return Result.success("引擎状态", java.util.Map.of(
-                "isRunning", engine.isRunning(),
-                "isPaused", engine.isPaused(),
-                "globalSuspended", engine.isGlobalSuspended(),
-                "simTime", engine.getSimTime()
-        ));
+        java.util.Map<String, Object> res = new java.util.HashMap<>();
+        res.put("isRunning", engine.isRunning());
+        res.put("isPaused", engine.isPaused());
+        res.put("globalSuspended", engine.isGlobalSuspended());
+        res.put("simTime", engine.getSimTime());
+        return Result.success("引擎状态", res);
     }
 
     /**

@@ -37,7 +37,7 @@ public class SafetyAndSyncValidator implements WorkInstructionValidator {
         if (req == null || req.getDeviceType() == null) {
             return;
         }
-        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
+        WorkInstruction wi = context.getWorkInstructionMap().get(req.getWiRefNo());
         if (wi == null) {
             return;
         }

@@ -23,12 +23,11 @@ public class SimulationEventWebSocketService {
     public void broadcast(SimEvent event) {
         if (event == null) return;
 
-        java.util.Set<EventTypeEnum> BROADCAST_EVENTS = java.util.Set.of(
-                EventTypeEnum.MOVE_START,
-                EventTypeEnum.ARRIVAL,
-                EventTypeEnum.FETCH_DONE,
-                EventTypeEnum.PUT_DONE
-        );
+        java.util.Set<EventTypeEnum> BROADCAST_EVENTS = new java.util.HashSet<>();
+        BROADCAST_EVENTS.add(EventTypeEnum.MOVE_START);
+        BROADCAST_EVENTS.add(EventTypeEnum.ARRIVAL);
+        BROADCAST_EVENTS.add(EventTypeEnum.FETCH_DONE);
+        BROADCAST_EVENTS.add(EventTypeEnum.PUT_DONE);
         if (!BROADCAST_EVENTS.contains(event.getType())) return;
 
         String deviceId = event.getPrimarySubject("DEVICE");
@@ -47,9 +46,12 @@ public class SimulationEventWebSocketService {
             payload.put("currentPosX", device.getPosX());
             payload.put("currentPosY", device.getPosY());
 
-            if (device instanceof Truck truck && truck.getRemainingMoveTargets() != null && !truck.getRemainingMoveTargets().isEmpty()) {
-                payload.put("targetPosX", truck.getRemainingMoveTargets().get(0).getX());
-                payload.put("targetPosY", truck.getRemainingMoveTargets().get(0).getY());
+            if (device instanceof Truck) {
+                Truck truck = (Truck) device;
+                if (truck.getRemainingMoveTargets() != null && !truck.getRemainingMoveTargets().isEmpty()) {
+                    payload.put("targetPosX", truck.getRemainingMoveTargets().get(0).getX());
+                    payload.put("targetPosY", truck.getRemainingMoveTargets().get(0).getY());
+                }
             }
         }
 

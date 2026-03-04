@@ -14,7 +14,7 @@ public class StowageValidator implements WorkInstructionValidator {
 
     @Override
     public void validate(AssignTaskReq req, GlobalContext context) {
-        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
+        WorkInstruction wi = context.getWorkInstructionMap().get(req.getWiRefNo());
         if (wi == null) return;
 
         // 真实堆场提箱阻挡校验

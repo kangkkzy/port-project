@@ -38,12 +38,12 @@ class SimulationWebSocketService {
             this.reconnectAttempts = 0;
 
             // 订阅仿真事件主题
-            this.client?.subscribe('/topic/sim-events', (message) => {
+            this.client?.subscribe('/topic/sim-events', (message: any) => {
                 this.handleMessage(message);
             });
         };
 
-        this.client.onStompError = (frame) => {
+        this.client.onStompError = (frame: any) => {
             console.error('[WS] 连接失败:', frame);
             this.handleDisconnect();
         };

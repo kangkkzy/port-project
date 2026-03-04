@@ -16,7 +16,7 @@ public class DeviceBindingValidator implements WorkInstructionValidator {
 
     @Override
     public void validate(AssignTaskReq req, GlobalContext context) {
-        WorkInstruction wi = context.getWorkInstruction(req.getWiRefNo());
+        WorkInstruction wi = context.getWorkInstructionMap().get(req.getWiRefNo());
         if (wi == null || wi.getMoveKind() == null) {
             return;
         }

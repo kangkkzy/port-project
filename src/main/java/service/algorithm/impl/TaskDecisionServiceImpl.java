@@ -44,7 +44,7 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
         // 校验器责任链：设备/作业合法性等在各自实现中完成
         try {
             for (WorkInstructionValidator validator : validators) {
-                validator.validate(wi, req);
+                validator.validate(req, context);
             }
         } catch (BusinessException e) {
             // 第三阶段核心：捕获堆叠或防碰撞异常，推送给前端
