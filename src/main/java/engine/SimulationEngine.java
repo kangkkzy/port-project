@@ -108,6 +108,21 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
+     * 单步执行一个事件（供前端单步调试/步进使用）
+     * 向外暴露安全的单步执行接口，避免外部 Controller 直接跨权限操作私有队列
+     * * @return 执行的事件，如果事件队列为空则返回 null
+     */
+    public SimEvent stepExecution() {
+        // 安全地从私有的优先队列中取出一个事件
+        SimEvent nextEvent = this.eventQueue.poll();
+        if (nextEvent != null) {
+            // 调用引擎原本私有的事件处理分发逻辑
+            this.processEvent(nextEvent);
+        }
+        return nextEvent;
+    }
+
+    /**
      * 取消事件
      */
     public boolean cancelEvent(String eventId) {

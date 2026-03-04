@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/sim/engine")
+@RequestMapping("/sim/debug")
 @RequiredArgsConstructor
 public class SimEngineController {
 
@@ -17,9 +17,10 @@ public class SimEngineController {
 
     @PostMapping("/step")
     public Result step() {
-        SimEvent nextEvent = engine.step();
-        if (nextEvent != null) {
-            return Result.success("执行了一个仿真事件", nextEvent.getType().name());
+        // 安全调用引擎向外暴露的单步执行方法
+        SimEvent executedEvent = engine.stepExecution();
+        if (executedEvent != null) {
+            return Result.success("执行了一个仿真事件", executedEvent.getType().name());
         }
         return Result.success("当前没有待处理的仿真事件");
     }
