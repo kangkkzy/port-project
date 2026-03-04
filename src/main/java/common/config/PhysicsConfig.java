@@ -26,4 +26,10 @@ public class PhysicsConfig {
      * 单一时间戳下允许处理的最大事件数量（防止死循环）
      */
     private int maxEventsPerTimestamp = 10_000;
+
+    /**
+     * 交接区域容差 (米)
+     * 用于判断设备是否到达交接区域
+     */
+    private double transferZoneTolerance = 5.0;
 }

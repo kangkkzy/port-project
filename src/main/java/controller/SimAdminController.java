@@ -5,6 +5,7 @@ import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
 import common.consts.FenceStateEnum;
 import engine.SimulationEngine;
+import engine.SimEvent;
 import lombok.Data;
 import engine.context.GlobalContext;
 import model.entity.*;
@@ -23,7 +24,7 @@ import java.util.Optional;
  * 仿真场景管理接口：重置与读取
  */
 @RestController
-@RequestMapping("/sim/admin")
+@RequestMapping("/sim/engine")
 public class SimAdminController {
 
     private final SimulationEngine engine;
@@ -32,6 +33,51 @@ public class SimAdminController {
     public SimAdminController(SimulationEngine engine, MapDataService mapDataService) {
         this.engine = engine;
         this.mapDataService = mapDataService;
+    }
+
+    /**
+     * 单步执行接口
+     * 当系统处于暂停状态时，调用该接口只会从事件队列中取出并执行1个事件
+     * 供前端慢动作单步调试
+     */
+    @PostMapping("/step")
+    public Result step() {
+        SimEvent event = engine.step();
+        if (event == null) {
+            return Result.error("单步执行失败：引擎正在运行或队列为空");
+        }
+        return Result.success("单步执行成功", event);
+    }
+
+    /**
+     * 获取引擎运行状态
+     */
+    @PostMapping("/status")
+    public Result getStatus() {
+        return Result.success("引擎状态", java.util.Map.of(
+                "isRunning", engine.isRunning(),
+                "isPaused", engine.isPaused(),
+                "globalSuspended", engine.isGlobalSuspended(),
+                "simTime", engine.getSimTime()
+        ));
+    }
+
+    /**
+     * 暂停引擎
+     */
+    @PostMapping("/pause")
+    public Result pause() {
+        engine.pause();
+        return Result.success("引擎已暂停");
+    }
+
+    /**
+     * 恢复引擎运行
+     */
+    @PostMapping("/resume")
+    public Result resume() {
+        engine.resume();
+        return Result.success("引擎已恢复运行");
     }
 
     /**

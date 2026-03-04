@@ -54,13 +54,19 @@ class SimulationWebSocketService {
     /**
      * 处理收到的消息
      */
-    private handleMessage(message: any) {
+    handleMessage(message: any) {
         try {
             const payload = JSON.parse(message.body);
             console.log('[WS] 收到事件:', payload);
 
             const simStore = useSimStore();
-            const { eventType, deviceId, targetPosX, targetPosY, durationMs } = payload;
+            const { eventType, deviceId, targetPosX, targetPosY, durationMs, errorMessage } = payload;
+
+            if (eventType === 'SIM_ERROR_EVENT') {
+                // 业务约束错误事件，推送到控制台并触发视觉告警
+                simStore.onSimulationError(deviceId, errorMessage);
+                return;
+            }
 
             if (eventType === 'MOVE_START' && deviceId) {
                 // 更新设备的 targetPosX/Y 和动画时长，让前端组件执行 CSS 过渡或 Canvas 补间
@@ -80,7 +86,7 @@ class SimulationWebSocketService {
     /**
      * 处理断开连接
      */
-    private handleDisconnect() {
+    handleDisconnect() {
         this.connected.value = false;
         this.client = null;
 

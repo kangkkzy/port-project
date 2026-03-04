@@ -16,14 +16,19 @@ import model.entity.BaseDevice;
 import model.entity.Container;
 import model.entity.Point;
 import model.entity.WorkInstruction;
+import model.entity.YardBlock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import service.algorithm.MapDataService;
 import model.dto.config.TransferZoneDto;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * 放箱完成 (PUT_DONE)
  * 更新箱子位置：设备 -> 目标位/集卡
+ * 同时更新 YardBlock 三维数组
  *
  * DES架构下的物理校验逻辑：
  * - 区分"绝对接触作业"与"跨距伸缩作业"
@@ -35,6 +40,9 @@ public class PutDoneHandler implements SimEventHandler {
 
     private static final double DEFAULT_PROXIMITY_THRESHOLD = 5.0;  // 默认接触距离阈值
     private static final double QC_TRUCK_Y_OFFSET = 60.0;           // QC轨道(140)与集卡道路(200)的偏移
+
+    // 堆场位置解析正则：YARD_A_01_02_03 表示 箱区_贝位_排号_层号
+    private static final Pattern YARD_POS_PATTERN = Pattern.compile("YARD_(\\w+)_(\\d+)_(\\d+)_(\\d+)");
 
     private final MapDataService mapDataService;
 
@@ -80,7 +88,22 @@ public class PutDoneHandler implements SimEventHandler {
             if (wi.getContainerId() != null) {
                 Container container = context.getContainerMap().get(wi.getContainerId());
                 if (container != null && wi.getToPos() != null) {
+                    String oldPos = container.getCurrentPos();
+
+                    // 如果箱子原来在设备上（已抓取），需要处理
+                    if (oldPos != null && oldPos.startsWith("YARD_")) {
+                        // 箱子从另一个堆场位置移动
+                        removeContainerFromYard(context, oldPos, container);
+                    }
+
+                    // 放箱到目标位置
                     container.setCurrentPos(wi.getToPos());
+
+                    // 如果目标位置是堆场，放入堆场三维数组
+                    if (wi.getToPos().startsWith("YARD_")) {
+                        addContainerToYard(context, wi.getToPos(), container);
+                    }
+
                     log.info("[Time: {}] [PUT_DONE] 设备 [{}] 放箱 [{}] 至最终位置 [{}]",
                             context.getSimTime(), deviceId, container.getContainerId(), wi.getToPos());
                 }
@@ -159,6 +182,50 @@ public class PutDoneHandler implements SimEventHandler {
         }
 
         return DEFAULT_PROXIMITY_THRESHOLD;
+    }
+
+    /**
+     * 从堆场三维数组中移除箱子
+     */
+    private void removeContainerFromYard(GlobalContext context, String yardPos, Container container) {
+        Matcher matcher = YARD_POS_PATTERN.matcher(yardPos);
+        if (matcher.matches()) {
+            String blockCode = matcher.group(1);
+            int bay = Integer.parseInt(matcher.group(2));
+            int row = Integer.parseInt(matcher.group(3));
+            int tier = Integer.parseInt(matcher.group(4));
+
+            YardBlock block = context.getYardBlockMap().get(blockCode);
+            if (block != null) {
+                Container removed = block.removeContainer(bay, row, tier);
+                if (removed != null) {
+                    log.debug("从堆场 {} 移除箱子 {}", yardPos, removed.getContainerId());
+                }
+            }
+        }
+    }
+
+    /**
+     * 将箱子放入堆场三维数组
+     */
+    private void addContainerToYard(GlobalContext context, String yardPos, Container container) {
+        Matcher matcher = YARD_POS_PATTERN.matcher(yardPos);
+        if (matcher.matches()) {
+            String blockCode = matcher.group(1);
+            int bay = Integer.parseInt(matcher.group(2));
+            int row = Integer.parseInt(matcher.group(3));
+            int tier = Integer.parseInt(matcher.group(4));
+
+            YardBlock block = context.getYardBlockMap().get(blockCode);
+            if (block != null) {
+                boolean success = block.putContainer(bay, row, tier, container);
+                if (success) {
+                    log.debug("将箱子 {} 放入堆场 {}", container.getContainerId(), yardPos);
+                } else {
+                    log.warn("无法将箱子 {} 放入堆场 {}，位置可能已被占用", container.getContainerId(), yardPos);
+                }
+            }
+        }
     }
 }
 

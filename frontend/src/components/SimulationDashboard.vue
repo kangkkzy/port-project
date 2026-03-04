@@ -143,24 +143,24 @@
             <v-layer name="devices">
               <v-group v-for="dev in displayDevices" :key="dev.id" :config="{ x: dev.posX, y: dev.posY }">
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
-                  <v-rect :config="{ x: -20, y: -25, width: 40, height: 50, fill: 'transparent', stroke: '#ff9800', strokeWidth: 4 }" />
-                  <v-line :config="{ points: [-20, 0, 20, 0], stroke: '#ff9800', strokeWidth: 4 }" />
-                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: selectedDeviceId === dev.id ? '#f5222d' : '#fff' }" />
+                  <v-rect :config="{ x: -20, y: -25, width: 40, height: 50, fill: 'transparent', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: dev.isAlerting ? 6 : 4 }" />
+                  <v-line :config="{ points: [-20, 0, 20, 0], stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: dev.isAlerting ? 6 : 4 }" />
+                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: selectedDeviceId === dev.id ? '#f5222d' : (dev.isAlerting ? '#ff0000' : '#fff') }" />
                 </template>
                 <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
-                  <v-rect :config="{ x: -15, y: -20, width: 30, height: 40, fill: 'transparent', stroke: '#4caf50', strokeWidth: 4 }" />
-                  <v-line :config="{ points: [0, -20, 0, 20], stroke: '#4caf50', strokeWidth: 4 }" />
-                  <v-circle :config="{ x: 0, y: 0, radius: 4, fill: selectedDeviceId === dev.id ? '#f5222d' : '#fff' }" />
+                  <v-rect :config="{ x: -15, y: -20, width: 30, height: 40, fill: 'transparent', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: dev.isAlerting ? 6 : 4 }" />
+                  <v-line :config="{ points: [0, -20, 0, 20], stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: dev.isAlerting ? 6 : 4 }" />
+                  <v-circle :config="{ x: 0, y: 0, radius: 4, fill: selectedDeviceId === dev.id ? '#f5222d' : (dev.isAlerting ? '#ff0000' : '#fff') }" />
                 </template>
                 <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
-                  <v-rect :config="{ x: -12, y: -6, width: 24, height: 12, fill: selectedDeviceId === dev.id ? '#ff4d4f' : '#2196f3', cornerRadius: 2 }" />
-                  <v-rect :config="{ x: 12, y: -5, width: 6, height: 10, fill: '#1565c0', cornerRadius: 1 }" />
+                  <v-rect :config="{ x: -12, y: -6, width: 24, height: 12, fill: selectedDeviceId === dev.id ? '#ff4d4f' : (dev.isAlerting ? '#ff0000' : '#2196f3'), cornerRadius: 2 }" />
+                  <v-rect :config="{ x: 12, y: -5, width: 6, height: 10, fill: dev.isAlerting ? '#cc0000' : '#1565c0', cornerRadius: 1 }" />
                 </template>
                 <template v-else>
-                  <v-rect :config="{ x: -10, y: -10, width: 20, height: 20, fill: '#909399' }" />
+                  <v-rect :config="{ x: -10, y: -10, width: 20, height: 20, fill: dev.isAlerting ? '#ff0000' : '#909399' }" />
                 </template>
 
-                <v-text :config="{ x: -25, y: 25, text: dev.id, fontSize: 12, fill: '#000', fontStyle: 'bold' }" />
+                <v-text :config="{ x: -25, y: 25, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#000', fontStyle: 'bold' }" />
                 <v-rect :config="{ x: -25, y: -25, width: 50, height: 50, fill: 'transparent' }" @click="selectDevice(dev.id, dev.type)" />
               </v-group>
             </v-layer>
@@ -178,6 +178,22 @@
               <span class="log-subject">{{ formatSubjects(log.subjects) }}</span>
             </li>
             <li v-if="simStore.events.length === 0" style="color: #666;">系统初始化就绪，等待事件触发...</li>
+          </ul>
+        </div>
+
+        <!-- 控制台面板：显示业务错误事件 -->
+        <div class="console-panel">
+          <div class="console-header">
+            <span>> 业务逻辑控制台 (Business Logic Console)</span>
+            <el-badge :value="errorCount" :max="99" class="error-badge" />
+          </div>
+          <ul class="console-list" ref="consoleContainer">
+            <li v-for="(err, idx) in consoleErrors" :key="idx" class="console-error">
+              <span class="console-time">[{{ err.simTime }}ms]</span>
+              <span class="console-device">{{ err.deviceId || 'SYSTEM' }}</span>
+              <span class="console-msg">{{ err.message }}</span>
+            </li>
+            <li v-if="consoleErrors.length === 0" style="color: #666;">等待业务约束校验...</li>
           </ul>
         </div>
       </div>
@@ -316,6 +332,15 @@ const selectedDeviceType = ref('')
 const selectedDeviceState = ref('')
 const selectedDevicePower = ref<number | null>(null)
 const logContainer = ref<HTMLElement | null>(null)
+const consoleContainer = ref<HTMLElement | null>(null)
+
+// 控制台错误日志（从 simStore.errors 中过滤出 SIM_ERROR_EVENT 类型）
+const consoleErrors = computed(() => {
+  return simStore.errors.filter((e: any) => e.type === 'SIM_ERROR_EVENT' || e.eventId?.startsWith('ERR_'))
+})
+
+// 错误计数
+const errorCount = computed(() => consoleErrors.value.length)
 
 // 计算属性：按类型分组路径
 const qcRails = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'QC_RAIL'))
@@ -350,6 +375,14 @@ watch(() => simStore.events.length, async () => {
   await nextTick()
   if (logContainer.value) {
     logContainer.value.scrollTop = logContainer.value.scrollHeight
+  }
+})
+
+// 控制台错误日志自动滚动
+watch(() => consoleErrors.value.length, async () => {
+  await nextTick()
+  if (consoleContainer.value) {
+    consoleContainer.value.scrollTop = consoleContainer.value.scrollHeight
   }
 })
 
@@ -389,8 +422,23 @@ const animateLoop = () => {
       }
       curr.state = target.state;
       curr.type = target.type;
+
+      // 检查设备是否有告警状态（3秒内闪烁红光）
+      const alertExpiry = simStore.deviceAlerts.get(target.id);
+      if (alertExpiry && now < alertExpiry) {
+        // 计算闪烁效果：每秒2次闪烁
+        const blinkPhase = Math.floor(now / 250) % 2;
+        curr.isAlerting = blinkPhase === 0;
+      } else {
+        curr.isAlerting = false;
+        if (alertExpiry && now >= alertExpiry) {
+          simStore.deviceAlerts.delete(target.id);
+        }
+      }
     }
   });
+  // 检查并清除过期告警
+  simStore.animateTick();
   animFrameId = requestAnimationFrame(animateLoop);
 };
 
@@ -677,6 +725,17 @@ const handleStageClick = async (e: any) => {
 .log-time { color: #888; margin-right: 12px; }
 .log-type { color: #569cd6; font-weight: bold; margin-right: 12px; display: inline-block; min-width: 120px; }
 .log-subject { color: #ce9178; }
+
+/* 控制台面板样式 */
+.console-panel { height: 150px; background: #2d1f1f; color: #ff6b6b; border-radius: 8px; padding: 15px; font-family: 'Consolas', monospace; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: 1px solid #8b0000; }
+.console-header { color: #ff6b6b; border-bottom: 1px solid #5c2b2b; padding-bottom: 8px; margin-bottom: 10px; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+.error-badge { margin-left: auto; }
+.console-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+.console-list li { margin-bottom: 6px; font-size: 13px; line-height: 1.4; }
+.console-error { color: #ff4444; }
+.console-time { color: #888; margin-right: 12px; }
+.console-device { color: #ff9800; font-weight: bold; margin-right: 12px; }
+.console-msg { color: #ff6b6b; }
 .right-section { width: 380px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
 .info-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 250px; display: flex; flex-direction: column; }
 .info-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }

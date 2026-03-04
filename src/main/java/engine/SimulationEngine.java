@@ -61,6 +61,17 @@ public class SimulationEngine implements InitializingBean {
     private volatile boolean globalSuspended = false;
 
     /**
+     * 运行状态：true 表示引擎正在运行（自动播放），false 表示暂停
+     */
+    private volatile boolean isRunning = false;
+
+    /**
+     * 暂停状态：用于单步调试
+     * 当 isPaused 为 true 且 isRunning 为 false 时，只执行单步
+     */
+    private volatile boolean isPaused = true;
+
+    /**
      * 回放速度倍率
      * 1.0 = 实时播放 (1ms 仿真时间 = 1ms 真实时间)
      * 2.0 = 2倍速, 0.5 = 0.5倍速
@@ -174,6 +185,20 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
+     * 获取全局暂停状态
+     */
+    public boolean isGlobalSuspended() {
+        return globalSuspended;
+    }
+
+    /**
+     * 获取当前仿真时间
+     */
+    public long getSimTime() {
+        return context.getSimTime();
+    }
+
+    /**
      * 重置仿真状态
      * 清空队列、重置时钟锁、清除错误记录。
      */
@@ -183,6 +208,8 @@ public class SimulationEngine implements InitializingBean {
         suspendedBizTypes.clear();
         suspendedEventIds.clear();
         globalSuspended = false;
+        isRunning = false;
+        isPaused = true;
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
 
@@ -212,6 +239,89 @@ public class SimulationEngine implements InitializingBean {
 
     public boolean isTimeSyncEnabled() {
         return timeSyncEnabled;
+    }
+
+    // ==================== 运行状态控制 ====================
+
+    /**
+     * 获取引擎是否正在运行（自动播放）
+     */
+    public boolean isRunning() {
+        return isRunning;
+    }
+
+    /**
+     * 设置引擎运行状态
+     */
+    public void setRunning(boolean running) {
+        this.isRunning = running;
+    }
+
+    /**
+     * 获取引擎是否暂停（用于单步调试）
+     */
+    public boolean isPaused() {
+        return isPaused;
+    }
+
+    /**
+     * 设置引擎暂停状态
+     * 当暂停时，可以执行单步调试
+     */
+    public void setPaused(boolean paused) {
+        this.isPaused = paused;
+    }
+
+    /**
+     * 恢复引擎运行
+     */
+    public void resume() {
+        this.isPaused = false;
+        this.isRunning = true;
+        log.info("仿真引擎已恢复运行");
+    }
+
+    /**
+     * 暂停引擎
+     */
+    public void pause() {
+        this.isRunning = false;
+        this.isPaused = true;
+        log.info("仿真引擎已暂停");
+    }
+
+    /**
+     * 单步执行接口
+     * 当系统处于暂停状态时，调用该接口只会从事件队列中取出并执行1个事件
+     * 供前端慢动作单步调试
+     */
+    public synchronized SimEvent step() {
+        if (globalSuspended) {
+            log.warn("拒绝单步执行：引擎处于全局暂停状态。");
+            return null;
+        }
+
+        if (isRunning) {
+            log.warn("拒绝单步执行：引擎正在自动运行中。");
+            return null;
+        }
+
+        // 设置为暂停状态
+        this.isPaused = true;
+
+        if (eventQueue.isEmpty()) {
+            log.info("事件队列为空，无法单步执行");
+            return null;
+        }
+
+        SimEvent nextEvent = eventQueue.poll();
+        if (nextEvent == null) {
+            return null;
+        }
+
+        log.info("单步执行事件: {} at time {}", nextEvent.getEventId(), nextEvent.getTriggerTime());
+        processEvent(nextEvent);
+        return nextEvent;
     }
 
     /**

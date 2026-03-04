@@ -34,5 +34,8 @@ public enum EventTypeEnum {
     FETCH_DONE,     // 完成抓箱操作
     REACH_PUT_POS,  // 放箱设备/集卡到达放箱位置
     PUT_DONE,       // 放箱操作完成
-    WI_COMPLETE     // 作业指令完成
+    WI_COMPLETE,    // 作业指令完成
+
+    // 业务异常事件
+    SIM_ERROR_EVENT // 业务约束拦截错误事件，推送到前端可视化告警
 }

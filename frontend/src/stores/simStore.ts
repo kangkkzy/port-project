@@ -63,6 +63,8 @@ export const useSimStore = defineStore('simulation', {
         transferZones: [] as TransferZone[],
         /** 设备动画状态 Map：deviceId -> 动画参数 */
         deviceAnimations: new Map<string, DeviceAnimationState>(),
+        /** 设备告警状态 Map：deviceId -> 告警结束时间戳 */
+        deviceAlerts: new Map<string, number>(),
     }),
 
     actions: {
@@ -204,6 +206,11 @@ export const useSimStore = defineStore('simulation', {
             }
         },
 
+        /** 动画帧回调：检查并清除过期的告警状态 */
+        animateTick() {
+            this.checkAlerts();
+        },
+
         togglePlay() {
             this.isPlaying = !this.isPlaying;
             if (this.isPlaying) {
@@ -279,6 +286,36 @@ export const useSimStore = defineStore('simulation', {
         onContainerOperation(deviceId: string, eventType: string) {
             console.log(`[Store] 设备 ${deviceId} 完成 ${eventType}`);
             // 可选：刷新 containers 或 workInstructions
+        },
+
+        /** WebSocket 推送事件处理：业务约束错误事件 */
+        onSimulationError(deviceId: string | null, errorMessage: string) {
+            console.error(`[Store] 仿真错误: device=${deviceId}, error=${errorMessage}`);
+
+            // 添加到错误日志
+            this.errors.push({
+                eventId: 'ERR_' + Date.now(),
+                simTime: this.simTime,
+                deviceId: deviceId,
+                message: errorMessage,
+                type: 'SIM_ERROR_EVENT'
+            });
+
+            // 触发设备视觉告警（如果有设备ID）
+            if (deviceId) {
+                // 设置告警状态，持续3秒
+                this.deviceAlerts.set(deviceId, Date.now() + 3000);
+            }
+        },
+
+        /** 检查并清除过期的告警状态 */
+        checkAlerts() {
+            const now = Date.now();
+            for (const [deviceId, expiryTime] of this.deviceAlerts.entries()) {
+                if (now > expiryTime) {
+                    this.deviceAlerts.delete(deviceId);
+                }
+            }
         }
     }
 });

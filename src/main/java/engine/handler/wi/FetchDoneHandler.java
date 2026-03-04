@@ -16,14 +16,19 @@ import model.entity.BaseDevice;
 import model.entity.Container;
 import model.entity.Point;
 import model.entity.WorkInstruction;
+import model.entity.YardBlock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import service.algorithm.MapDataService;
 import model.dto.config.TransferZoneDto;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * 抓箱完成 (FETCH_DONE)
  * 更新箱子位置：地面/集卡 -> 设备
+ * 同时更新 YardBlock 三维数组
  *
  * DES架构下的物理校验逻辑：
  * - 区分"绝对接触作业"与"跨距伸缩作业"
@@ -35,6 +40,9 @@ public class FetchDoneHandler implements SimEventHandler {
 
     private static final double DEFAULT_PROXIMITY_THRESHOLD = 5.0;  // 默认接触距离阈值
     private static final double QC_TRUCK_Y_OFFSET = 60.0;           // QC轨道(140)与集卡道路(200)的偏移
+
+    // 堆场位置解析正则：YARD_A_01_02_03 表示 箱区_贝位_排号_层号
+    private static final Pattern YARD_POS_PATTERN = Pattern.compile("YARD_(\\w+)_(\\d+)_(\\d+)_(\\d+)");
 
     private final MapDataService mapDataService;
 
@@ -144,11 +152,39 @@ public class FetchDoneHandler implements SimEventHandler {
             Container container = context.getContainerMap().get(wi.getContainerId());
             if (container != null) {
                 String oldPos = container.getCurrentPos();
+
+                // 如果箱子原来在堆场，从堆场三维数组中移除
+                if (oldPos != null && oldPos.startsWith("YARD_")) {
+                    removeContainerFromYard(context, oldPos, container);
+                }
+
+                // 更新箱子位置到设备上
                 container.setCurrentPos(device.getId());
                 log.info("[Time: {}] [FETCH_DONE] 设备 [{}] 抓取箱 [{}]。位置: {} -> {}",
                         context.getSimTime(), deviceId, container.getContainerId(), oldPos, device.getId());
             } else {
                 log.warn("[FETCH_DONE] 箱号 {} 未找到", wi.getContainerId());
+            }
+        }
+    }
+
+    /**
+     * 从堆场三维数组中移除箱子
+     */
+    private void removeContainerFromYard(GlobalContext context, String yardPos, Container container) {
+        Matcher matcher = YARD_POS_PATTERN.matcher(yardPos);
+        if (matcher.matches()) {
+            String blockCode = matcher.group(1);
+            int bay = Integer.parseInt(matcher.group(2));
+            int row = Integer.parseInt(matcher.group(3));
+            int tier = Integer.parseInt(matcher.group(4));
+
+            YardBlock block = context.getYardBlockMap().get(blockCode);
+            if (block != null) {
+                Container removed = block.removeContainer(bay, row, tier);
+                if (removed != null) {
+                    log.debug("从堆场 {} 移除箱子 {}", yardPos, removed.getContainerId());
+                }
             }
         }
     }

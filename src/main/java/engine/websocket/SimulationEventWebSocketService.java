@@ -91,5 +91,29 @@ public class SimulationEventWebSocketService {
             log.warn("广播仿真事件失败: {}", e.getMessage());
         }
     }
+
+    /**
+     * 广播业务约束错误事件。
+     * 当捕获到 BusinessException 时，组装成 SIM_ERROR_EVENT 推送给前端。
+     *
+     * @param deviceId 引起错误的设备 ID
+     * @param errorMessage 错误原因描述
+     * @param simTime 当前仿真时间
+     */
+    public void broadcastError(String deviceId, String errorMessage, long simTime) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("eventId", "ERR_" + System.currentTimeMillis());
+        payload.put("eventType", EventTypeEnum.SIM_ERROR_EVENT.name());
+        payload.put("deviceId", deviceId);
+        payload.put("errorMessage", errorMessage);
+        payload.put("simTime", simTime);
+
+        try {
+            messagingTemplate.convertAndSend(TOPIC, payload);
+            log.info("广播业务错误事件: device={}, error={}", deviceId, errorMessage);
+        } catch (Exception e) {
+            log.warn("广播业务错误事件失败: {}", e.getMessage());
+        }
+    }
 }
 
