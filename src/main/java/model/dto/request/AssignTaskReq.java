@@ -9,12 +9,18 @@ import lombok.Data;
  */
 @Data
 public class AssignTaskReq {
-    // 设备ID
+    // 设备ID（单设备下发时使用）
     private String deviceId;
 
-    // 设备类型
+    // 设备类型（单设备下发时使用）
     private DeviceTypeEnum deviceType;
 
     // 工单编号
     private String wiRefNo;
+
+    // 外部算法分配的集卡ID
+    private String truckId;
+
+    // 外部算法分配的岸桥或龙门吊ID
+    private String craneId;
 }

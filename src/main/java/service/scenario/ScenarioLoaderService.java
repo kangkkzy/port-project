@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import common.consts.BizTypeEnum;
 import common.consts.DeviceStateEnum;
 import common.consts.DeviceTypeEnum;
+import common.consts.WiStatusEnum;
 import engine.context.GlobalContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -153,7 +154,8 @@ public class ScenarioLoaderService {
     private WorkInstruction toWorkInstruction(ScenarioFileDto.WorkInstructionEntryDto dto) {
         WorkInstruction wi = new WorkInstruction();
         wi.setWiRefNo(dto.getWiRefNo());
-        wi.setStatus(common.consts.WiStatusEnum.CREATED);
+        // 初始指令状态使用等待处理态
+        wi.setWiStatus(WiStatusEnum.PENDING.getCode());
         wi.setMoveKind(parseBizType(dto.getMoveKind()));
         wi.setFetchCheId(dto.getFetchCheId());
         wi.setCarryCheId(dto.getCarryCheId());
