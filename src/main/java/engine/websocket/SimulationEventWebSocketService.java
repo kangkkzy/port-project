@@ -1,7 +1,6 @@
 package engine.websocket;
 
 import common.consts.EventTypeEnum;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import engine.SimEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,109 +10,47 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * 仿真事件 WebSocket 广播服务。
- * 当核心物理事件（MOVE_START, ARRIVAL, FETCH_DONE, PUT_DONE）成功执行时，
- * 向所有连入的 WebSocket 客户端推送轻量级 JSON 消息。
- */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class SimulationEventWebSocketService {
 
     private final SimpMessagingTemplate messagingTemplate;
-    private final ObjectMapper objectMapper;
 
-    /** 广播目标主题 */
-    private static final String TOPIC = "/topic/sim-events";
-
-    /** 需要广播的事件类型 */
-    private static final java.util.Set<EventTypeEnum> BROADCAST_EVENTS = java.util.Set.of(
-            EventTypeEnum.MOVE_START,
-            EventTypeEnum.ARRIVAL,
-            EventTypeEnum.FETCH_DONE,
-            EventTypeEnum.PUT_DONE
-    );
-
-    /**
-     * 广播仿真事件。
-     * 若事件类型在 BROADCAST_EVENTS 中，则向 /topic/sim-events 推送消息。
-     *
-     * @param event 已处理完成的事件
-     * @param durationMs 事件耗时（毫秒），前端用于动画时长
-     */
-    public void broadcast(SimEvent event, long durationMs) {
+    public void broadcast(SimEvent event) {
         if (event == null) return;
 
-        EventTypeEnum type = event.getType();
-        if (!BROADCAST_EVENTS.contains(type)) {
-            return;
-        }
+        // 仅广播前端动画关心的核心物理事件
+        java.util.Set<EventTypeEnum> BROADCAST_EVENTS = java.util.Set.of(
+                EventTypeEnum.MOVE_START,
+                EventTypeEnum.ARRIVAL,
+                EventTypeEnum.FETCH_DONE,
+                EventTypeEnum.PUT_DONE
+        );
+        if (!BROADCAST_EVENTS.contains(event.getType())) return;
 
-        String deviceId = event.getPrimaryDeviceId();
-        if (deviceId == null) {
-            deviceId = event.getPrimarySubject("DEVICE");
-        }
+        // 安全获取设备 ID：只能使用 getPrimarySubject("DEVICE")
+        String deviceId = event.getPrimarySubject("DEVICE");
+        if (deviceId == null) return;
 
-        // 构建轻量级消息
         Map<String, Object> payload = new HashMap<>();
         payload.put("eventId", event.getEventId());
-        payload.put("eventType", type.name());
+        payload.put("eventType", event.getType().name());
         payload.put("deviceId", deviceId);
         payload.put("simTime", event.getTriggerTime());
-        payload.put("durationMs", durationMs);
 
-        // 提取目标坐标（如果有）
-        Object data = event.getData();
-        if (data instanceof Map) {
+        // 安全提取 data 中的负载参数（不要调用实体中不存在的方法）
+        if (event.getData() instanceof Map) {
             @SuppressWarnings("unchecked")
-            Map<String, Object> dataMap = (Map<String, Object>) data;
-            Object targetXObj = dataMap.get("targetX");
-            Object targetYObj = dataMap.get("targetY");
-            // 兼容 Point 对象序列化后的 x/y 字段
-            if (targetXObj == null && dataMap.containsKey("targetPoint")) {
-                Object targetPoint = dataMap.get("targetPoint");
-                if (targetPoint instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> pointMap = (Map<String, Object>) targetPoint;
-                    targetXObj = pointMap.get("x");
-                    targetYObj = pointMap.get("y");
-                }
-            }
-            if (targetXObj != null) payload.put("targetPosX", targetXObj);
-            if (targetYObj != null) payload.put("targetPosY", targetYObj);
+            Map<String, Object> dataMap = (Map<String, Object>) event.getData();
+            payload.putAll(dataMap); // 将 targetX, targetY, durationMS 等信息直接透传
         }
 
         try {
-            messagingTemplate.convertAndSend(TOPIC, payload);
-            log.debug("广播仿真事件: {} - {} -> device={}", type.name(), event.getEventId(), deviceId);
+            messagingTemplate.convertAndSend("/topic/sim-events", payload);
+            log.debug("广播事件到前端: {} -> {}", event.getType(), deviceId);
         } catch (Exception e) {
             log.warn("广播仿真事件失败: {}", e.getMessage());
         }
     }
-
-    /**
-     * 广播业务约束错误事件。
-     * 当捕获到 BusinessException 时，组装成 SIM_ERROR_EVENT 推送给前端。
-     *
-     * @param deviceId 引起错误的设备 ID
-     * @param errorMessage 错误原因描述
-     * @param simTime 当前仿真时间
-     */
-    public void broadcastError(String deviceId, String errorMessage, long simTime) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("eventId", "ERR_" + System.currentTimeMillis());
-        payload.put("eventType", EventTypeEnum.SIM_ERROR_EVENT.name());
-        payload.put("deviceId", deviceId);
-        payload.put("errorMessage", errorMessage);
-        payload.put("simTime", simTime);
-
-        try {
-            messagingTemplate.convertAndSend(TOPIC, payload);
-            log.info("广播业务错误事件: device={}, error={}", deviceId, errorMessage);
-        } catch (Exception e) {
-            log.warn("广播业务错误事件失败: {}", e.getMessage());
-        }
-    }
 }
-

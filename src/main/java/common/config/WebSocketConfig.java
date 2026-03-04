@@ -25,7 +25,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // SockJS 回退支持，前端使用 STOMP Client 连接 /ws/sim-events
-        registry.addEndpoint("/ws/sim-events")
+        registry.addEndpoint("/ws-sim")
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
     }

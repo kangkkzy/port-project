@@ -25,7 +25,7 @@ class SimulationWebSocketService {
         // 动态导入 sockjs-client 和 stompjs（需在项目中安装）
         import('sockjs-client').then((SockJS) => {
             import('stompjs').then((STOMP) => {
-                const socket = new SockJS.default('/ws/sim-events');
+                const socket = new SockJS.default('/ws-sim');
                 this.client = STOMP.over(socket);
 
                 this.client.connect(
