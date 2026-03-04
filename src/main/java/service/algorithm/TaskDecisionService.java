@@ -5,16 +5,9 @@ import model.dto.response.AssignTaskResp;
 
 /**
  * 任务决策服务接口
- * 负责评估任务耗电、路径、时间等 并作出最终的调度决策
+ * 负责接收外部算法下发的调度指令，并推入物理引擎执行
  */
 public interface TaskDecisionService {
-    /**
-     * 评估任务并作出决策 (执行业务 或 重定向去充电)
-     *
-     * @param req 任务指派请求
-     * @return 决策响应
-     */
-    AssignTaskResp evaluateAndDecide(AssignTaskReq req);
 
     /**
      * 外部算法直接指派任务到引擎

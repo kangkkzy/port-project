@@ -18,7 +18,7 @@ public class SimTestController {
     private final TaskDecisionService taskDecisionService;
 
     @PostMapping("/load-scenario")
-    public Result loadScenario(@RequestParam(defaultValue = "scenarios/scenario-demo.json") String fileName) {
+    public Result loadScenario(@RequestParam(defaultValue = "scenario-demo.json") String fileName) {
         ScenarioLoaderService.LoadResult result = scenarioLoaderService.load(fileName);
         return Result.success("场景加载成功并已重置沙盘环境", result);
     }

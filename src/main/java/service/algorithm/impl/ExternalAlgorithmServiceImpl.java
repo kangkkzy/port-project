@@ -120,7 +120,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
     @Override
     public AssignTaskResp assignTask(AssignTaskReq req) {
         synchronized (context) {
-            AssignTaskResp resp = taskDecisionService.evaluateAndDecide(req);
+            AssignTaskResp resp = taskDecisionService.assignTask(req);
 
             Map<String, Object> payload = new HashMap<>();
             payload.put("wiRefNo", req.getWiRefNo());

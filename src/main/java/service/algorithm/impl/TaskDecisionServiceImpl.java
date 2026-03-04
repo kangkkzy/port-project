@@ -1,13 +1,11 @@
 package service.algorithm.impl;
 
-import common.consts.ErrorCodes;
 import common.exception.BusinessException;
 import engine.log.SimulationStatisticsService;
 import engine.context.GlobalContext;
 import engine.websocket.SimulationEventWebSocketService;
 import model.dto.request.AssignTaskReq;
 import model.dto.response.AssignTaskResp;
-import model.entity.BaseDevice;
 import model.entity.WorkInstruction;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -22,6 +20,7 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
     private final GlobalContext context = GlobalContext.getInstance();
     private final List<WorkInstructionValidator> validators;
     private final SimulationStatisticsService statisticsService;
+
     @Autowired(required = false)
     private SimulationEventWebSocketService webSocketService;
 
@@ -31,44 +30,44 @@ public class TaskDecisionServiceImpl implements TaskDecisionService {
         this.statisticsService = statisticsService;
     }
 
+    // 将方法名重命名为 assignTask 以完美实现接口
     @Override
-    public AssignTaskResp evaluateAndDecide(AssignTaskReq req) {
+    public AssignTaskResp assignTask(AssignTaskReq req) {
         statisticsService.recordTaskAttempt();
 
-        BaseDevice device = getDevice(req);
-        if (device == null) throw new BusinessException(ErrorCodes.DEVICE_NOT_FOUND);
+        // 动态获取调度主体ID（兼容外部算法新加的 truckId/craneId，或旧的 deviceId）
+        String devId = null;
+        if (req.getTruckId() != null) {
+            devId = req.getTruckId();
+        } else if (req.getCraneId() != null) {
+            devId = req.getCraneId();
+        } else {
+            devId = req.getDeviceId(); // 兼容老代码
+        }
 
         WorkInstruction wi = context.getWorkInstructionMap().get(req.getWiRefNo());
-        if (wi == null) throw new BusinessException("作业指令不存在");
+        if (wi == null) {
+            throw new BusinessException("作业指令不存在: " + req.getWiRefNo());
+        }
 
-        // 校验器责任链：设备/作业合法性等在各自实现中完成
+        // 核心：校验器责任链。所有的设备存在性、绑定关系、空间堆叠、防碰撞都在这里统一完成
         try {
             for (WorkInstructionValidator validator : validators) {
                 validator.validate(req, context);
             }
         } catch (BusinessException e) {
-            // 第三阶段核心：捕获堆叠或防碰撞异常，推送给前端
+            // 捕获堆叠或防碰撞等业务异常，通过 WebSocket 推送到前端沙盘控制台标红展示
             if (webSocketService != null) {
-                String devId = req.getDeviceId();
                 webSocketService.broadcastError(devId, e.getMessage(), context.getSimTime());
             }
-            throw e; // 继续向上抛出，阻断后续调度
+            throw e; // 继续抛出异常，阻断该错误指令加入物理执行队列
         }
 
         AssignTaskResp resp = new AssignTaskResp();
-        resp.setTruckId(req.getDeviceId());
+        // 将成功分配的状态返回
+        resp.setTruckId(devId);
         resp.setAssignedWiRefNo(req.getWiRefNo());
         resp.setNextAction("PROCEED_TASK");
         return resp;
-    }
-
-    private BaseDevice getDevice(AssignTaskReq req) {
-        if (req.getDeviceType() == null) throw new BusinessException("设备类型为空");
-        switch (req.getDeviceType()) {
-            case ELECTRIC_TRUCK: case OIL_TRUCK: return context.getTruckMap().get(req.getDeviceId());
-            case ASC: return context.getAscMap().get(req.getDeviceId());
-            case QC: return context.getQcMap().get(req.getDeviceId());
-            default: return context.getDevice(req.getDeviceId());
-        }
     }
 }
