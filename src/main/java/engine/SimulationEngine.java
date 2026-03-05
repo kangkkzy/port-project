@@ -23,9 +23,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
 
 /**
- * 仿真引擎核心
- * 负责维护仿真时钟、管理事件优先队列、调度事件处理以及处理全局异常熔断。
- * 设计原则：单一时钟源、串行事件链。一旦发生未捕获异常，引擎将触发全局暂停以保护现场。
+ * 仿真引擎核心类
+ * <p>
+ * 负责：
+ * - 维护仿真时钟（单一时间源）
+ * - 管理事件优先队列（按触发时间排序）
+ * - 调度事件处理器（根据事件类型分发）
+ * - 处理全局熔断（异常时暂停引擎）
+ * - 提供单步执行、连续运行、播放控制等接口
+ * <p>
+ * 设计原则：
+ * - 串行事件处理，每次只处理一个事件，保证状态一致性
+ * - 一旦发生未捕获异常，触发全局暂停，保护现场便于排查
+ * - 支持回放速度调节和时间同步（用于前端动画）
  */
 @Component
 @Slf4j
@@ -35,70 +45,96 @@ public class SimulationEngine implements InitializingBean {
     private final PhysicsConfig physicsConfig;
     private final SimulationEventLog eventLog;
     private final SimulationErrorLog errorLog;
+
     @Autowired(required = false)
-    private SimulationEventWebSocketService webSocketService;
+    private SimulationEventWebSocketService webSocketService;   // 可选，没有也能运行
+
     private final GlobalContext context = GlobalContext.getInstance();
 
-    // 数据结构
+    // -------------------- 数据结构 --------------------
 
     /**
-     * 事件优先队列
-     * 按仿真时间戳排序 驱动仿真推进
+     * 事件优先队列，按仿真时间戳升序排列。
+     * 引擎的核心驱动：每次从中取出最早的事件进行处理。
      */
     private final PriorityBlockingQueue<SimEvent> eventQueue = new PriorityBlockingQueue<>();
 
-    /** 事件处理器注册表 */
+    /**
+     * 事件类型到处理器的映射表。
+     * 由 Spring 自动注入所有 SimEventHandler 实现类，并在 afterPropertiesSet 中注册。
+     */
     private final Map<EventTypeEnum, SimEventHandler> handlerMap = new EnumMap<>(EventTypeEnum.class);
-    private final List<SimEventHandler> handlerBeans;
-
-    /** 事件索引，用于快速查找/取消事件 */
-    private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
-
-    // 状态控制
+    private final List<SimEventHandler> handlerBeans;   // 由构造器注入所有处理器 Bean
 
     /**
-     * 全局暂停标志
-     * 出现异常时置为 true，阻断后续事件执行，直到人工 reset。
+     * 事件ID到事件的映射，用于快速查找或取消事件。
+     */
+    private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
+
+    // -------------------- 状态控制标志 --------------------
+
+    /**
+     * 全局暂停标志。
+     * 当引擎处理事件抛出异常时置为 true，阻止后续所有事件执行，直到人工 reset。
      */
     private volatile boolean globalSuspended = false;
 
     /**
-     * 运行状态：true 表示引擎正在运行（自动播放），false 表示暂停
+     * 引擎是否正在自动运行（连续播放）。
      */
     private volatile boolean isRunning = false;
 
     /**
-     * 暂停状态：用于单步调试
-     * 当 isPaused 为 true 且 isRunning 为 false 时，只执行单步
+     * 引擎是否处于暂停状态（用于单步调试）。
+     * 当 isRunning == false 且 isPaused == true 时，允许执行单步。
      */
     private volatile boolean isPaused = true;
 
     /**
-     * 回放速度倍率
-     * 1.0 = 实时播放 (1ms 仿真时间 = 1ms 真实时间)
-     * 2.0 = 2倍速, 0.5 = 0.5倍速
+     * 回放速度倍率。
+     * 1.0 = 实时（1ms 仿真时间对应 1ms 真实时间）
+     * 2.0 = 2倍速，0.5 = 0.5倍速
      */
     private double playbackSpeed = 1.0;
 
     /**
-     * 是否启用时间同步（用于动画展示）
+     * 是否启用时间同步。
+     * 启用后，引擎在处理事件之间会 sleep 适当时间，使前端动画平滑。
      */
     private boolean timeSyncEnabled = false;
 
-    // 暂停现场记录
+    // -------------------- 暂停现场记录 --------------------
+
+    /**
+     * 被挂起的业务类型集合（用于前端展示哪些业务被阻塞）。
+     */
     private final java.util.Set<common.consts.BizTypeEnum> suspendedBizTypes = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 被挂起的事件ID集合（导致熔断的事件源头）。
+     */
     private final java.util.Set<String> suspendedEventIds = ConcurrentHashMap.newKeySet();
+
+    // -------------------- 初始化 --------------------
 
     @Override
     public void afterPropertiesSet() {
-        // 自动注册所有 Spring 管理的 Handler
+        // 将所有 Spring 管理的 SimEventHandler 注册到 handlerMap
         for (SimEventHandler handler : handlerBeans) {
             handlerMap.put(handler.getType(), handler);
         }
     }
 
+    // -------------------- 事件调度 --------------------
+
     /**
-     * 调度新事件
+     * 调度一个新事件，放入事件队列。
+     *
+     * @param parentEventId 父事件ID（可为空）
+     * @param triggerTime   触发时间（仿真时间戳）
+     * @param type          事件类型
+     * @param data          附加数据（通常为 Map）
+     * @return 生成的事件对象
      */
     public SimEvent scheduleEvent(String parentEventId, long triggerTime, EventTypeEnum type, Object data) {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
@@ -108,22 +144,10 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 单步执行一个事件（供前端单步调试/步进使用）
-     * 向外暴露安全的单步执行接口，避免外部 Controller 直接跨权限操作私有队列
-     * * @return 执行的事件，如果事件队列为空则返回 null
-     */
-    public SimEvent stepExecution() {
-        // 安全地从私有的优先队列中取出一个事件
-        SimEvent nextEvent = this.eventQueue.poll();
-        if (nextEvent != null) {
-            // 调用引擎原本私有的事件处理分发逻辑
-            this.processEvent(nextEvent);
-        }
-        return nextEvent;
-    }
-
-    /**
-     * 取消事件
+     * 取消指定事件（标记为已取消，实际处理时会跳过）。
+     *
+     * @param eventId 事件ID
+     * @return 如果事件存在则返回 true
      */
     public boolean cancelEvent(String eventId) {
         SimEvent event = eventIdMap.get(eventId);
@@ -134,13 +158,101 @@ public class SimulationEngine implements InitializingBean {
         return true;
     }
 
+    // -------------------- 事件处理核心 --------------------
+
     /**
-     * 辅助方法：尝试回溯报错事件关联的业务类型
+     * 处理单个事件的核心逻辑。
+     * 包含：移除事件ID映射、推进仿真时钟、记录日志、调用处理器、WebSocket广播。
+     * 任何异常都会触发全局熔断。
+     *
+     * @param event 待处理的事件
+     */
+    private void processEvent(SimEvent event) {
+        // 跳过已取消的事件
+        if (event.isCancelled()) {
+            eventIdMap.remove(event.getEventId());
+            return;
+        }
+
+        // 如果已经全局暂停，不再处理新事件
+        if (globalSuspended) {
+            return;
+        }
+
+        // 从映射中移除（事件已取出）
+        eventIdMap.remove(event.getEventId());
+
+        // 推进仿真时钟到事件触发时间
+        context.setSimTime(event.getTriggerTime());
+
+        // 记录流水日志（供前端查询）
+        EventLogEntryDto logEntry = new EventLogEntryDto();
+        logEntry.setSimTime(event.getTriggerTime());
+        logEntry.setType(event.getType());
+        logEntry.setEventId(event.getEventId());
+        logEntry.setParentEventId(event.getParentEventId());
+        logEntry.setSubjects(event.getSubjects());
+        eventLog.append(logEntry);
+
+        // 查找对应的事件处理器
+        SimEventHandler handler = handlerMap.get(event.getType());
+        if (handler != null) {
+            try {
+                // 执行处理器
+                handler.handle(event, this, context);
+
+                // 通过 WebSocket 推送事件给前端（如果服务可用）
+                if (webSocketService != null) {
+                    webSocketService.broadcast(event);
+                }
+            } catch (Exception e) {
+                // 处理异常，触发全局熔断
+                String errorMsg = String.format("事件处理异常，触发熔断: Type=%s, Id=%s, Time=%d, Error=%s",
+                        event.getType(), event.getEventId(), event.getTriggerTime(), e.getMessage());
+
+                errorLog.recordEventProcessingError(event.getEventId(), event.getType(),
+                        event.getTriggerTime(), errorMsg, e, true);
+                log.error(errorMsg, e);
+
+                triggerGlobalSuspend(event);
+            }
+        } else {
+            log.warn("未找到事件类型 {} 的处理器，忽略执行。", event.getType());
+        }
+    }
+
+    // -------------------- 全局熔断 --------------------
+
+    /**
+     * 触发全局熔断，记录错误上下文并锁死引擎。
+     *
+     * @param sourceEvent 导致熔断的事件源
+     */
+    private void triggerGlobalSuspend(SimEvent sourceEvent) {
+        this.globalSuspended = true;
+
+        if (sourceEvent != null) {
+            log.error(">>> 仿真引擎触发全局暂停 <<< 错误源头: Id={}, Type={}", sourceEvent.getEventId(), sourceEvent.getType());
+            suspendedEventIds.add(sourceEvent.getEventId());
+
+            // 尝试获取关联的业务类型，用于前端展示
+            common.consts.BizTypeEnum bizType = getBizTypeFromEvent(sourceEvent);
+            if (bizType != null) {
+                suspendedBizTypes.add(bizType);
+            }
+        } else {
+            log.error(">>> 仿真引擎触发全局暂停 <<< (未知事件源)");
+        }
+    }
+
+    /**
+     * 辅助方法：从事件中回溯关联的业务类型（MoveKind）。
+     * 用于熔断时记录被挂起的业务类型。
      */
     private common.consts.BizTypeEnum getBizTypeFromEvent(SimEvent event) {
         if (event == null) return null;
 
-        // 1. 尝试从 payload 获取
+        // 1. 尝试从事件 payload 中获取 wiRefNo
         if (event.getData() instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> payload = (Map<String, Object>) event.getData();
@@ -150,13 +262,15 @@ public class SimulationEngine implements InitializingBean {
                 if (wi != null) return wi.getMoveKind();
             }
         }
-        // 尝试从关联的 WI Subject 获取
+
+        // 2. 尝试从事件主体中获取 WI
         String wiRefNoFromSubject = event.getPrimarySubject("WI");
         if (wiRefNoFromSubject != null) {
             WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNoFromSubject);
             if (wi != null) return wi.getMoveKind();
         }
-        // 尝试从设备反查
+
+        // 3. 尝试从关联设备反查当前作业指令
         String deviceId = event.getPrimaryDeviceId();
         if (deviceId != null) {
             BaseDevice device = context.getDevice(deviceId);
@@ -165,33 +279,18 @@ public class SimulationEngine implements InitializingBean {
                 if (wi != null) return wi.getMoveKind();
             }
         }
-        // 递归父事件
+
+        // 4. 递归父事件
         String parentEventId = event.getParentEventId();
         if (parentEventId != null) {
             SimEvent parentEvent = eventIdMap.get(parentEventId);
             if (parentEvent != null) return getBizTypeFromEvent(parentEvent);
         }
+
         return null;
     }
 
-    /**
-     * 触发全局熔断
-     * 记录错误上下文并锁死引擎。
-     */
-    private void triggerGlobalSuspend(SimEvent event) {
-        this.globalSuspended = true;
-
-        if (event != null) {
-            log.error(">>> 仿真引擎触发全局暂停 <<< 错误源头: Id={}, Type={}", event.getEventId(), event.getType());
-            suspendedEventIds.add(event.getEventId());
-            common.consts.BizTypeEnum bizType = getBizTypeFromEvent(event);
-            if (bizType != null) {
-                suspendedBizTypes.add(bizType);
-            }
-        } else {
-            log.error(">>> 仿真引擎触发全局暂停 <<< (未知事件源)");
-        }
-    }
+    // -------------------- 对外状态查询 --------------------
 
     public java.util.Set<common.consts.BizTypeEnum> getSuspendedBizTypes() {
         return new java.util.HashSet<>(suspendedBizTypes);
@@ -201,23 +300,19 @@ public class SimulationEngine implements InitializingBean {
         return new java.util.HashSet<>(suspendedEventIds);
     }
 
-    /**
-     * 获取全局暂停状态
-     */
     public boolean isGlobalSuspended() {
         return globalSuspended;
     }
 
-    /**
-     * 获取当前仿真时间
-     */
     public long getSimTime() {
         return context.getSimTime();
     }
 
+    // -------------------- 引擎重置 --------------------
+
     /**
-     * 重置仿真状态
-     * 清空队列、重置时钟锁、清除错误记录。
+     * 重置仿真引擎到初始状态。
+     * 清空事件队列、清除熔断标志、恢复暂停状态。
      */
     public synchronized void reset() {
         eventQueue.clear();
@@ -230,12 +325,8 @@ public class SimulationEngine implements InitializingBean {
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
 
-    // ==================== 播放控制 ====================
+    // -------------------- 播放控制 --------------------
 
-    /**
-     * 设置回放速度倍率
-     * @param speed 速度倍率 (1.0 = 实时, 2.0 = 2倍速, 0.5 = 0.5倍速)
-     */
     public void setPlaybackSpeed(double speed) {
         this.playbackSpeed = speed;
         log.info("回放速度已设置为: {}x", speed);
@@ -245,10 +336,6 @@ public class SimulationEngine implements InitializingBean {
         return playbackSpeed;
     }
 
-    /**
-     * 启用/禁用时间同步
-     * 启用后，引擎在事件间会等待真实时间（用于前端动画展示）
-     */
     public void setTimeSyncEnabled(boolean enabled) {
         this.timeSyncEnabled = enabled;
         log.info("时间同步已{}", enabled ? "启用" : "禁用");
@@ -258,39 +345,24 @@ public class SimulationEngine implements InitializingBean {
         return timeSyncEnabled;
     }
 
-    // ==================== 运行状态控制 ====================
-
-    /**
-     * 获取引擎是否正在运行（自动播放）
-     */
     public boolean isRunning() {
         return isRunning;
     }
 
-    /**
-     * 设置引擎运行状态
-     */
     public void setRunning(boolean running) {
         this.isRunning = running;
     }
 
-    /**
-     * 获取引擎是否暂停（用于单步调试）
-     */
     public boolean isPaused() {
         return isPaused;
     }
 
-    /**
-     * 设置引擎暂停状态
-     * 当暂停时，可以执行单步调试
-     */
     public void setPaused(boolean paused) {
         this.isPaused = paused;
     }
 
     /**
-     * 恢复引擎运行
+     * 恢复引擎自动运行。
      */
     public void resume() {
         this.isPaused = false;
@@ -299,7 +371,7 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 暂停引擎
+     * 暂停引擎自动运行。
      */
     public void pause() {
         this.isRunning = false;
@@ -307,10 +379,13 @@ public class SimulationEngine implements InitializingBean {
         log.info("仿真引擎已暂停");
     }
 
+    // -------------------- 单步执行 --------------------
+
     /**
-     * 单步执行接口
-     * 当系统处于暂停状态时，调用该接口只会从事件队列中取出并执行1个事件
-     * 供前端慢动作单步调试
+     * 单步执行一个事件（供前端单步调试使用）。
+     * 仅在引擎处于暂停状态且未全局熔断时有效。
+     *
+     * @return 执行的事件，若无可执行事件则返回 null
      */
     public synchronized SimEvent step() {
         if (globalSuspended) {
@@ -323,7 +398,7 @@ public class SimulationEngine implements InitializingBean {
             return null;
         }
 
-        // 设置为暂停状态
+        // 确保处于暂停状态
         this.isPaused = true;
 
         if (eventQueue.isEmpty()) {
@@ -342,34 +417,14 @@ public class SimulationEngine implements InitializingBean {
     }
 
     /**
-     * 时间同步：将仿真时间与真实时间对齐
-     * 根据 playbackSpeed 计算需要等待的真实时间
+     * 单步执行下一个事件（简化版，不检查运行状态，用于内部或批量调用）。
+     * 此方法与 step() 功能类似，但省略了 isRunning 检查，适合在引擎停止时手动调用。
+     * 建议外部使用 step() 以确保状态一致性。
+     *
+     * @return 执行的事件，若无则返回 null
+     * @deprecated 推荐使用 {@link #step()}
      */
-    private void syncToRealTime(long targetSimTime) {
-        long currentSimTime = context.getSimTime();
-        long timeDelta = targetSimTime - currentSimTime;
-
-        if (timeDelta <= 0) {
-            return;
-        }
-
-        // 根据播放速度计算真实需要等待的时间
-        long realTimeToSleep = (long) (timeDelta / playbackSpeed);
-
-        if (realTimeToSleep > 0) {
-            try {
-                Thread.sleep(realTimeToSleep);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("时间同步被中断");
-            }
-        }
-    }
-
-    /**
-     * 单步执行
-     * 供前端单步调试或 runUntil 内部调用。
-     */
+    @Deprecated
     public synchronized SimEvent stepNextEvent() {
         if (globalSuspended) {
             log.warn("拒绝执行：引擎处于全局暂停状态。");
@@ -389,66 +444,21 @@ public class SimulationEngine implements InitializingBean {
         return nextEvent;
     }
 
-    /**
-     * 事件处理核心逻辑
-     * 包含完整的异常捕获 只要有异常就会中断
-     */
-    private void processEvent(SimEvent nextEvent) {
-        // 跳过已取消或暂停状态
-        if (nextEvent.isCancelled()) {
-            eventIdMap.remove(nextEvent.getEventId());
-            return;
-        }
-        if (globalSuspended) {
-            return;
-        }
-
-        eventIdMap.remove(nextEvent.getEventId());
-
-        // 推进时钟
-        context.setSimTime(nextEvent.getTriggerTime());
-
-        // 记录流水日志
-        EventLogEntryDto logEntry = new EventLogEntryDto();
-        logEntry.setSimTime(nextEvent.getTriggerTime());
-        logEntry.setType(nextEvent.getType());
-        logEntry.setEventId(nextEvent.getEventId());
-        logEntry.setParentEventId(nextEvent.getParentEventId());
-        logEntry.setSubjects(nextEvent.getSubjects());
-        eventLog.append(logEntry);
-
-        // 分发执行
-        SimEventHandler handler = handlerMap.get(nextEvent.getType());
-        if (handler != null) {
-            try {
-                handler.handle(nextEvent, this, context);
-                // 推送事件给前端
-                if (webSocketService != null) {
-                    webSocketService.broadcast(nextEvent);
-                }
-            } catch (Exception e) {
-                String errorMsg = String.format("事件处理异常，触发熔断: Type=%s, Id=%s, Time=%d, Error=%s",
-                        nextEvent.getType(), nextEvent.getEventId(), nextEvent.getTriggerTime(), e.getMessage());
-
-                errorLog.recordEventProcessingError(nextEvent.getEventId(), nextEvent.getType(),
-                        nextEvent.getTriggerTime(), errorMsg, e, true);
-                log.error(errorMsg, e);
-
-                triggerGlobalSuspend(nextEvent);
-            }
-        } else {
-            log.warn("未找到事件类型 {} 的处理器，忽略执行。", nextEvent.getType());
-        }
-    }
+    // -------------------- 连续运行 --------------------
 
     /**
-     * 连续运行直到指定时间
-     * 防止同一时间戳产生无限微小事件
+     * 连续运行引擎直到指定的仿真时间。
+     * <p>
+     * 从事件队列中依次取出触发时间 ≤ targetSimTime 的事件并处理。
+     * 包含死循环检测：同一时间戳连续处理事件数超过配置阈值时抛出异常并熔断。
+     *
+     * @param targetSimTime 目标仿真时间（毫秒）
+     * @throws SimulationDeadLoopException 当检测到死循环时抛出
      */
     public synchronized void runUntil(long targetSimTime) {
-        int sameTimeEventCount = 0;
-        long lastProcessedTime = -1L;
-        int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp();
+        int sameTimeEventCount = 0;          // 同一时间戳连续处理的事件计数
+        long lastProcessedTime = -1L;        // 上一个处理的事件时间戳
+        int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp(); // 阈值
         long currentTime = context.getSimTime();
 
         while (!eventQueue.isEmpty()) {
@@ -459,14 +469,14 @@ public class SimulationEngine implements InitializingBean {
 
             SimEvent nextEvent = eventQueue.peek();
             if (nextEvent.getTriggerTime() > targetSimTime) {
-                // 已推进到目标时间 更新时钟并退出
+                // 已推进到目标时间之后，更新时钟并退出
                 if (!globalSuspended && targetSimTime > currentTime) {
                     context.setSimTime(targetSimTime);
                 }
                 break;
             }
 
-            // 死循环检测
+            // 死循环检测：同一时间戳连续处理过多事件
             if (nextEvent.getTriggerTime() == lastProcessedTime) {
                 sameTimeEventCount++;
                 if (sameTimeEventCount > maxEventsPerTimestamp) {
@@ -479,22 +489,50 @@ public class SimulationEngine implements InitializingBean {
                 }
             } else {
                 lastProcessedTime = nextEvent.getTriggerTime();
-                sameTimeEventCount = 1;
+                sameTimeEventCount = 1;   // 重置为新时间戳的第一个事件
             }
 
-            // 时间同步睡眠（用于前端动画展示）
+            // 如果启用了时间同步，根据播放速度等待真实时间（用于前端动画）
             if (timeSyncEnabled) {
                 syncToRealTime(nextEvent.getTriggerTime());
             }
 
+            // 取出并处理事件
             eventQueue.poll();
             processEvent(nextEvent);
             currentTime = context.getSimTime();
         }
 
-        // 空跑或队列处理完后 确保时钟对齐到目标时间
+        // 如果队列为空但目标时间大于当前时间，直接推进时钟（空闲推进）
         if (!globalSuspended && eventQueue.isEmpty() && targetSimTime > currentTime) {
             context.setSimTime(targetSimTime);
+        }
+    }
+
+    /**
+     * 时间同步：根据播放速度使真实时间与仿真时间对齐。
+     * 用于前端动画展示时，让事件之间的间隔在真实时间上被感知。
+     *
+     * @param targetSimTime 即将处理的事件的时间戳
+     */
+    private void syncToRealTime(long targetSimTime) {
+        long currentSimTime = context.getSimTime();
+        long timeDelta = targetSimTime - currentSimTime;
+
+        if (timeDelta <= 0) {
+            return;
+        }
+
+        // 根据播放速度计算需要等待的真实毫秒数
+        long realTimeToSleep = (long) (timeDelta / playbackSpeed);
+
+        if (realTimeToSleep > 0) {
+            try {
+                Thread.sleep(realTimeToSleep);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("时间同步被中断");
+            }
         }
     }
 }

@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 public class SimStateController {
 
     /**
-     * 调试用所有接口
+     * 调试用：返回整个 GlobalContext，包含所有内部状态
      */
     @GetMapping("/all")
     public Result getAllState() {
@@ -50,7 +50,7 @@ public class SimStateController {
     }
 
     /**
-     * 构建所有设备的快照
+     * 构建所有设备的快照（集卡、岸桥、龙门吊）
      */
     private List<DeviceSnapshotDto> buildDeviceSnapshots(GlobalContext ctx) {
         List<DeviceSnapshotDto> allDevices = new ArrayList<>();
@@ -102,6 +102,9 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 构建围栏快照列表
+     */
     private List<FenceSnapshotDto> buildFenceSnapshots(GlobalContext ctx) {
         return ctx.getFenceMap().values().stream().map(f -> {
             FenceSnapshotDto dto = new FenceSnapshotDto();
@@ -117,6 +120,9 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 构建充电桩快照列表
+     */
     private List<ChargingStationSnapshotDto> buildChargingStationSnapshots(GlobalContext ctx) {
         return ctx.getChargingStationMap().values().stream().map(s -> {
             ChargingStationSnapshotDto dto = new ChargingStationSnapshotDto();
@@ -130,6 +136,9 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 构建船舶快照列表
+     */
     private List<VesselSnapshotDto> buildVesselSnapshots(GlobalContext ctx) {
         return ctx.getVesselMap().values().stream().map(v -> {
             VesselSnapshotDto dto = new VesselSnapshotDto();
@@ -142,6 +151,9 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 构建作业指令快照列表
+     */
     private List<WorkInstructionSnapshotDto> buildWiSnapshots(GlobalContext ctx) {
         return ctx.getWorkInstructionMap().values().stream().map(wi -> {
             WorkInstructionSnapshotDto dto = new WorkInstructionSnapshotDto();
@@ -156,6 +168,9 @@ public class SimStateController {
         }).collect(Collectors.toList());
     }
 
+    /**
+     * 构建集装箱快照列表
+     */
     private List<ContainerSnapshotDto> buildContainerSnapshots(GlobalContext ctx) {
         return ctx.getContainerMap().values().stream().map(container -> {
             ContainerSnapshotDto dto = new ContainerSnapshotDto();
