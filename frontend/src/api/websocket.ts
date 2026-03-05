@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { ref } from 'vue';
 import { useSimStore } from '../stores/simStore';
-// @ts-ignore
+// [关键修改]：直接引用包名，由 Vite 处理模块查找
 import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 
@@ -11,41 +11,46 @@ import { Client } from '@stomp/stompjs';
  */
 class SimulationWebSocketService {
     private client: Client | null = null;
-    private connected = ref(false);
+    public connected = ref(false);
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
     private reconnectDelay = 3000;
 
     /**
      * 连接到 WebSocket 服务器
-     * 使用 STOMP over SockJS
      */
     connect() {
         if (this.client && this.connected.value) {
-            console.log('[WS] 已连接');
+            console.log('[WS] 已经处于连接状态');
             return;
         }
 
+        // 配置 STOMP 客户端
         this.client = new Client({
+            // 后端 WebSocket 端点地址
             webSocketFactory: () => new SockJS('http://localhost:8080/ws-sim'),
             reconnectDelay: 5000,
             heartbeatIncoming: 4000,
             heartbeatOutgoing: 4000,
+            debug: (msg) => console.log('[WS Debug]', msg)
         });
 
         this.client.onConnect = () => {
-            console.log('[WS] 已连接');
+            console.log('✅ [WS] 连接成功');
             this.connected.value = true;
             this.reconnectAttempts = 0;
 
             // 订阅仿真事件主题
-            this.client?.subscribe('/topic/sim-events', (message: any) => {
+            this.client!.subscribe('/topic/sim-events', (message) => {
                 this.handleMessage(message);
             });
         };
 
-        this.client.onStompError = (frame: any) => {
-            console.error('[WS] 连接失败:', frame);
+        this.client.onStompError = (frame) => {
+            console.error('❌ [WS] STOMP 协议错误:', frame.headers['message']);
+        };
+
+        this.client.onWebSocketClose = () => {
             this.handleDisconnect();
         };
 
@@ -53,72 +58,36 @@ class SimulationWebSocketService {
     }
 
     /**
-     * 处理收到的消息
+     * 解析并处理后端推送的仿真事件
      */
-    handleMessage(message: any) {
+    private handleMessage(message: any) {
+        const simStore = useSimStore();
         try {
-            const payload = JSON.parse(message.body);
-            console.log('[WS] 收到事件:', payload);
+            const eventData = JSON.parse(message.body);
+            // 将事件存入 Store，驱动视图更新
+            simStore.handleSimEvent(eventData);
 
-            const simStore = useSimStore();
-            const { eventType, deviceId, targetPosX, targetPosY, durationMs, message: errorMessage } = payload;
-
-            if (eventType === 'SIM_ERROR_EVENT') {
-                // 业务约束错误事件，推送到控制台并触发视觉告警
-                simStore.onSimulationError(deviceId, errorMessage);
-                return;
-            }
-
-            if (eventType === 'MOVE_START' && deviceId) {
-                // 更新设备的 targetPosX/Y 和动画时长，让前端组件执行 CSS 过渡或 Canvas 补间
-                simStore.updateDeviceTarget(deviceId, targetPosX, targetPosY, durationMs);
-            } else if (eventType === 'ARRIVAL' && deviceId) {
-                // 到达目标，更新实际坐标
-                simStore.updateDevicePosition(deviceId, targetPosX, targetPosY);
-            } else if ((eventType === 'FETCH_DONE' || eventType === 'PUT_DONE') && deviceId) {
-                // 抓/落箱完成，可能需要更新箱状态
-                simStore.onContainerOperation(deviceId, eventType);
-            }
+            console.log('[WS] 收到事件:', eventData.eventType, eventData.deviceId);
         } catch (e) {
-            console.error('[WS] 解析消息失败:', e);
+            console.error('[WS] 消息解析异常:', e);
         }
     }
 
-    /**
-     * 处理断开连接
-     */
-    handleDisconnect() {
+    private handleDisconnect() {
         this.connected.value = false;
-        this.client = null;
-
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            console.log(`[WS] ${this.reconnectDelay / 1000}s 后重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+            console.log(`[WS] 连接断开，尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
             setTimeout(() => this.connect(), this.reconnectDelay);
-        } else {
-            console.error('[WS] 达到最大重连次数，停止重连');
         }
     }
 
-    /**
-     * 断开连接
-     */
-    disconnect() {
+    public disconnect() {
         if (this.client) {
             this.client.deactivate();
-            this.client = null;
             this.connected.value = false;
-            console.log('[WS] 已断开连接');
         }
-    }
-
-    /**
-     * 是否已连接
-     */
-    isConnected() {
-        return this.connected.value;
     }
 }
 
-// 导出单例
 export const wsService = new SimulationWebSocketService();
