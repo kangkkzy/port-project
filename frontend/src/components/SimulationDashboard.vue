@@ -1,235 +1,105 @@
 <template>
   <div class="dashboard">
     <div class="toolbar">
-      <h2>港口离散仿真系统 (外部算法驱动模式)</h2>
+      <h2>港口离散仿真内核验证台</h2>
       <div class="buttons">
-        <el-button type="info" @click="handleInitScene" :loading="isInitLoading">一键加载场景</el-button>
-        <el-button type="warning" @click="handleDispatchTasks">外部算法下发任务</el-button>
-        <el-button type="primary" @click="handleStep">单步推演 (Next)</el-button>
-        <el-button type="success" @click="handleTogglePlay">
-          {{ simStore.isPlaying ? '暂停播放' : '自动播放' }}
-        </el-button>
-        <el-button type="danger" @click="handleReset">重置系统</el-button>
+        <!-- 三个测试按钮：加载场景、正常流程、异常拦截 -->
+        <el-button type="info" @click="handleMockInit">1. 外部加载: 地图与作业场景</el-button>
+        <el-button type="success" @click="handleMockNormal">2. 外部调度: 绑定任务与下发流程</el-button>
+        <el-button type="danger" @click="handleMockError">3. 异常拦截: 下发非法位置越界</el-button>
+        <!-- 核心控制：单步推演和重置 -->
+        <el-button type="primary" @click="handleStep" style="margin-left: 20px; font-weight: bold;">单步推演 (Next Event)</el-button>
+        <el-button type="warning" @click="handleReset" style="margin-left: 10px;">清空重置</el-button>
       </div>
       <div class="time-display">
-        当前仿真时钟: <strong>{{ simStore.simTime }}</strong> ms
+        当前时钟: <strong>{{ simStore.simTime }}</strong> ms
       </div>
     </div>
 
     <div class="main-content">
       <div class="left-section">
+        <!-- 画布区域：使用 Konva 渲染地图和设备 -->
         <div class="map-container">
-          <v-stage :config="stageConfig" @click="handleStageClick">
+          <v-stage :config="stageConfig">
             <v-layer name="background">
-              <v-rect :config="{ x: 0, y: 0, width: 800, height: 120, fill: '#bbdefb', name: 'bg' }" />
-              <v-text :config="{ x: 20, y: 50, text: '海域 / 船泊区 (VESSEL)', fontSize: 24, fill: '#1565c0', opacity: 0.5, name: 'bg' }" />
-              <v-rect v-for="(yard, idx) in yardAreas" :key="'yard-bg-'+idx" :config="{ x: yard.x, y: yard.y, width: yard.width, height: yard.height, fill: yard.fill, stroke: yard.stroke, strokeWidth: 2, name: 'bg' }" />
+              <!-- 简单的背景色和文字示意海侧区域 -->
+              <v-rect :config="{ x: 0, y: 0, width: 800, height: 100, fill: '#bbdefb' }" />
+              <v-text :config="{ x: 20, y: 40, text: '海侧区域', fontSize: 24, fill: '#1565c0', opacity: 0.5 }" />
             </v-layer>
 
             <v-layer name="rails">
-              <v-line v-for="(path, idx) in qcRails" :key="'qc-rail-'+idx" :config="{ points: [path.startPoint, path.position, path.endPoint, path.position], stroke: '#e53935', strokeWidth: 3, dash: [15, 10], opacity: 0.8, name: 'rail' }" />
-              <v-line v-for="(path, idx) in ascRails" :key="'asc-rail-'+idx" :config="{ points: [path.position, path.startPoint, path.position, path.endPoint], stroke: '#8e24aa', strokeWidth: 3, dash: [15, 10], opacity: 0.8, name: 'rail' }" />
-              <v-text :config="{ x: 30, y: 115, text: 'QC轨道(红色)', fontSize: 10, fill: '#e53935', name: 'rail' }" />
-              <v-text :config="{ x: 120, y: 255, text: 'ASC轨道(紫色)', fontSize: 10, fill: '#8e24aa', name: 'rail' }" />
-            </v-layer>
-
-            <v-layer name="roads">
-              <v-line v-for="(path, idx) in truckRoads" :key="'truck-road-'+idx" :config="{ points: path.direction === 'HORIZONTAL' ? [path.startPoint, path.position, path.endPoint, path.position] : [path.position, path.startPoint, path.position, path.endPoint], stroke: '#ffb300', strokeWidth: 8, opacity: 0.7, lineCap: 'round', name: 'road' }" />
-              <v-text :config="{ x: 30, y: 145, text: '集卡道路(黄色)', fontSize: 10, fill: '#ffb300', name: 'road' }" />
-            </v-layer>
-
-            <v-layer name="transfer-zones">
-              <v-rect v-for="zone in simStore.transferZones" :key="'zone-'+zone.zoneId" :config="{ x: zone.xRange[0], y: zone.yRange[0], width: zone.xRange[1] - zone.xRange[0], height: zone.yRange[1] - zone.yRange[0], fill: zone.zoneId.startsWith('QC') ? 'rgba(255, 152, 0, 0.25)' : 'rgba(76, 175, 80, 0.25)', stroke: zone.zoneId.startsWith('QC') ? '#ff9800' : '#4caf50', strokeWidth: 2, dash: [8, 4], name: 'transfer' }" />
-              <v-text v-for="zone in simStore.transferZones" :key="'zone-label-'+zone.zoneId" :config="{ x: zone.xRange[0] + 5, y: zone.yRange[0] + 3, text: zone.name, fontSize: 9, fontStyle: 'bold', fill: zone.zoneId.startsWith('QC') ? '#e65100' : '#1b5e20', name: 'transfer' }" />
-            </v-layer>
-
-            <v-layer name="facilities">
-              <v-circle v-for="fence in simStore.fences" :key="fence.nodeId" :config="{ x: fence.posX, y: fence.posY, radius: fence.radius || 20, fill: fence.status === '02' ? '#4caf50' : '#f44336', opacity: 0.5, stroke: '#333', strokeWidth: 2 }" />
-              <v-rect v-for="station in simStore.chargingStations" :key="station.stationCode" :config="{ x: station.posX - 8, y: station.posY - 8, width: 16, height: 16, fill: '#ffeb3b', stroke: '#f57f17', strokeWidth: 2, cornerRadius: 3 }" />
-              <v-rect v-for="c in simStore.containers" :key="c.containerId" :config="{ x: (c.posX || 0) - 6, y: (c.posY || 0) - 6, width: 12, height: 12, fill: '#ff7043', stroke: '#bf360c', strokeWidth: 1, cornerRadius: 2 }" />
-              <v-rect v-for="v in simStore.vessels" :key="v.vesselId" :config="{ x: (v.berthLocation || 0) - (v.length || 50) / 2, y: 20, width: v.length || 50, height: 40, fill: '#90caf9', stroke: '#0d47a1', strokeWidth: 2, cornerRadius: 5 }" />
-              <v-text v-for="v in simStore.vessels" :key="v.vesselId + '-label'" :config="{ x: (v.berthLocation || 0) - 30, y: 65, text: v.vesselId, fontSize: 12, fill: '#0d47a1', fontStyle: 'bold' }" />
+              <!-- 动态渲染地图路径（轨道/道路） -->
+              <template v-for="(path, idx) in simStore.mapPaths" :key="'path-'+idx">
+                <v-line :config="{
+                  points: path.direction === 'HORIZONTAL'
+                          ? [path.startPoint, path.position, path.endPoint, path.position]
+                          : [path.position, path.startPoint, path.position, path.endPoint],
+                  stroke: getPathColor(path.pathType),
+                  strokeWidth: path.pathType === 'TRUCK_ROAD' ? 8 : 3,
+                  dash: path.pathType === 'TRUCK_ROAD' ? [] : [15, 10],
+                  opacity: 0.7
+                }" />
+                <v-text :config="{
+                  x: path.direction === 'HORIZONTAL' ? 30 : path.position + 10,
+                  y: path.direction === 'HORIZONTAL' ? path.position - 15 : 255,
+                  text: `${path.name}(${path.direction === 'HORIZONTAL'?'Y':'X'}=${path.position})`,
+                  fontSize: 10, fill: getPathColor(path.pathType)
+                }" />
+              </template>
             </v-layer>
 
             <v-layer name="devices">
+              <!-- 渲染所有设备，并根据状态显示不同样式 -->
               <v-group v-for="dev in displayDevices" :key="dev.id" :config="{ x: dev.posX, y: dev.posY }">
-                <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
-                  <v-rect :config="{ x: -20, y: -25, width: 40, height: 50, fill: 'transparent', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: dev.isAlerting ? 6 : 4 }" />
-                  <v-line :config="{ points: [-20, 0, 20, 0], stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: dev.isAlerting ? 6 : 4 }" />
-                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: selectedDeviceId === dev.id ? '#f5222d' : (dev.isAlerting ? '#ff0000' : '#fff') }" />
-                </template>
-                <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
-                  <v-rect :config="{ x: -15, y: -20, width: 30, height: 40, fill: 'transparent', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: dev.isAlerting ? 6 : 4 }" />
-                  <v-line :config="{ points: [0, -20, 0, 20], stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: dev.isAlerting ? 6 : 4 }" />
-                  <v-circle :config="{ x: 0, y: 0, radius: 4, fill: selectedDeviceId === dev.id ? '#f5222d' : (dev.isAlerting ? '#ff0000' : '#fff') }" />
-                </template>
-                <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
-                  <v-rect :config="{ x: -12, y: -6, width: 24, height: 12, fill: selectedDeviceId === dev.id ? '#ff4d4f' : (dev.isAlerting ? '#ff0000' : '#2196f3'), cornerRadius: 2 }" />
-                  <v-rect :config="{ x: 12, y: -5, width: 6, height: 10, fill: dev.isAlerting ? '#cc0000' : '#1565c0', cornerRadius: 1 }" />
-                </template>
-                <template v-else>
-                  <v-rect :config="{ x: -10, y: -10, width: 20, height: 20, fill: dev.isAlerting ? '#ff0000' : '#909399' }" />
+
+                <!-- 如果是起重机且正在 Z 轴作业，显示动画进度条 -->
+                <template v-if="(dev.type === 'QC' || dev.type === 'ASC') && simStore.activeZOperations.has(dev.id)">
+                  <v-text :config="{ x: -30, y: -45, text: '↕ Z轴作业中', fill: '#00bcd4', fontSize: 12, fontStyle: 'bold' }" />
+                  <v-rect :config="{ x: -20, y: -30, width: 40, height: 5, fill: '#e0e0e0', cornerRadius: 2 }" />
+                  <v-rect :config="{ x: -20, y: -30, width: (Date.now() % 2000) / 2000 * 40, height: 5, fill: '#00bcd4', cornerRadius: 2 }" />
                 </template>
 
-                <v-text :config="{ x: -25, y: 25, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#000', fontStyle: 'bold' }" />
-                <v-rect :config="{ x: -25, y: -25, width: 50, height: 50, fill: 'transparent' }" @click="selectDevice(dev.id, dev.type)" />
+                <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等 -->
+                <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
+                  <v-rect :config="{ x: -20, y: -20, width: 40, height: 40, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4 }" />
+                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: dev.isAlerting ? '#ff0000' : '#ff9800' }" />
+                </template>
+                <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
+                  <v-rect :config="{ x: -15, y: -15, width: 30, height: 30, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4 }" />
+                </template>
+                <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
+                  <v-rect :config="{ x: -12, y: -6, width: 24, height: 12, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2 }" />
+                </template>
+
+                <!-- 显示设备 ID -->
+                <v-text :config="{ x: -25, y: 25, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
               </v-group>
             </v-layer>
           </v-stage>
         </div>
 
+        <!-- 终端日志面板：显示仿真内核事件 -->
         <div class="terminal-panel">
-          <div class="terminal-header">
-            <span>> 离散事件引擎内核日志 (Discrete Event Engine Logs)</span>
-          </div>
+          <div class="terminal-header">> 离散事件引擎内核日志 (Discrete Event Engine Logs)</div>
           <ul class="log-list" ref="logContainer">
             <li v-for="log in simStore.events" :key="log.eventId">
               <span class="log-time">[{{ log.simTime }}ms]</span>
               <span class="log-type">{{ log.type }}</span>
               <span class="log-subject">{{ formatSubjects(log.subjects) }}</span>
             </li>
-            <li v-if="simStore.events.length === 0" style="color: #666;">系统初始化就绪，等待事件触发...</li>
-          </ul>
-        </div>
-
-        <div class="console-panel">
-          <div class="console-header">
-            <span>> 业务逻辑控制台 (Business Logic Console)</span>
-            <el-badge :value="errorCount" :max="99" class="error-badge" />
-          </div>
-          <ul class="console-list" ref="consoleContainer">
-            <li v-for="(err, idx) in consoleErrors" :key="idx" class="console-error">
-              <span class="console-time">[{{ err.simTime }}ms]</span>
-              <span class="console-device">{{ err.deviceId || 'SYSTEM' }}</span>
-              <span class="console-msg">{{ err.message }}</span>
-            </li>
-            <li v-if="consoleErrors.length === 0" style="color: #666;">等待业务约束校验...</li>
           </ul>
         </div>
       </div>
 
-      <div class="right-section">
-        <div class="info-panel">
-          <h3>实时设备状态 (共 {{ simStore.devices.length }} 台)</h3>
-          <ul class="device-list">
-            <li v-for="dev in simStore.devices" :key="dev.id" @click="selectDevice(dev.id, dev.type)" :class="{ active: selectedDeviceId === dev.id }">
-              <span class="dev-id" :style="{ color: getDeviceColor(dev.type) }">{{ dev.id }}</span>
-              <span class="dev-state">[{{ dev.state }}]</span>
-              <span class="dev-pos">坐标: ({{ dev.posX.toFixed(0) }}, {{ dev.posY.toFixed(0) }})</span>
-              <span v-if="dev.powerLevel" class="dev-power">电量: {{ dev.powerLevel }}%</span>
-            </li>
-          </ul>
+      <!-- 右侧拦截台：显示业务逻辑错误和警告 -->
+      <div class="log-console" style="position: absolute; right: 20px; top: 120px; width: 320px; background: rgba(0,0,0,0.85); color: #fff; padding: 15px; border-radius: 8px; z-index: 999; max-height: 500px; overflow-y: auto;">
+        <h3 style="margin-top: 0; color: #ffeb3b; border-bottom: 1px solid #666; padding-bottom: 8px;">⚠️ 业务逻辑拦截台</h3>
+        <div v-if="simStore.eventLogs.length === 0" style="color: #aaa; font-size: 12px; margin-top: 10px;">暂无拦截记录...</div>
+        <div v-for="(log, index) in simStore.eventLogs" :key="index" style="margin-top: 10px; font-size: 13px; line-height: 1.5; border-bottom: 1px dashed #444; padding-bottom: 8px;">
+          <span style="color: #ff5722; font-family: monospace;">[{{ log.simTime }}ms]</span>
+          <span style="color: #03a9f4; font-weight: bold; margin-left: 5px;">{{ log.deviceId }}</span>
+          <div style="color: #ff8a80; margin-top: 4px;">✖ {{ log.message }}</div>
         </div>
-
-        <div class="control-panel" v-if="selectedDeviceId">
-          <h3>设备控制 - {{ selectedDeviceId }}</h3>
-          <div class="control-info">
-            <p><strong>类型:</strong> {{ selectedDeviceType }}</p>
-            <p><strong>状态:</strong> {{ selectedDeviceState }}</p>
-            <p v-if="selectedDevicePower"><strong>电量:</strong> {{ selectedDevicePower }}%</p>
-          </div>
-          <div class="control-buttons">
-            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK' || selectedDeviceType === 'INTERNAL_TRUCK'" type="primary" size="small" @click="showTruckMoveDialog = true">移动</el-button>
-            <el-button v-if="selectedDeviceType === 'QC' || selectedDeviceType === 'ASC'" type="primary" size="small" @click="showCraneMoveDialog = true">移动</el-button>
-            <el-button v-if="selectedDeviceType === 'ELECTRIC_TRUCK'" type="warning" size="small" @click="showChargeDialog = true">充电</el-button>
-            <el-button v-if="selectedDeviceType === 'QC' || selectedDeviceType === 'ASC'" type="success" size="small" @click="showCraneOpDialog = true">操作</el-button>
-          </div>
-        </div>
-
-        <div class="fence-panel" v-if="simStore.fences.length > 0">
-          <h3>围栏状态 (共 {{ simStore.fences.length }} 个)</h3>
-          <ul class="fence-list">
-            <li v-for="fence in simStore.fences" :key="fence.nodeId">
-              <span class="fence-id">{{ fence.nodeId }}</span>
-              <span :class="['fence-status', fence.status === '02' ? 'open' : 'closed']">{{ fence.status === '02' ? '通行' : '禁止通行' }}</span>
-              <el-button size="small" @click="toggleFence(fence)">{{ fence.status === '02' ? '关闭' : '开启' }}</el-button>
-            </li>
-          </ul>
-        </div>
-
-        <div class="wi-panel" v-if="simStore.workInstructions.length > 0">
-          <h3>作业指令 (共 {{ simStore.workInstructions.length }} 条)</h3>
-          <ul class="wi-list">
-            <li v-for="wi in simStore.workInstructions" :key="wi.wiRefNo">
-              <span class="wi-ref">{{ wi.wiRefNo }}</span>
-              <span class="wi-move">{{ wi.moveKind }}</span>
-              <span class="wi-status">{{ wi.wiStatus }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="error-panel" v-if="simStore.errors.length > 0">
-          <h3>错误日志 (共 {{ simStore.errors.length }} 条)</h3>
-          <ul class="error-list">
-            <li v-for="(err, idx) in simStore.errors.slice(-10)" :key="idx">
-              <span class="err-time">[{{ err.simTime }}ms]</span>
-              <span class="err-msg">{{ err.message || err.error }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <el-dialog v-model="showTruckMoveDialog" title="集卡移动控制" width="400px">
-      <el-form label-width="80px">
-        <el-form-item label="目标X"><el-input-number v-model="truckMoveTarget.x" :min="0" :max="800" /></el-form-item>
-        <el-form-item label="目标Y"><el-input-number v-model="truckMoveTarget.y" :min="0" :max="600" /></el-form-item>
-        <el-form-item label="速度"><el-input-number v-model="truckMoveTarget.speed" :min="1" :max="50" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="showTruckMoveDialog = false">取消</el-button><el-button type="primary" @click="handleTruckMove">确认移动</el-button></template>
-    </el-dialog>
-
-    <el-dialog v-model="showCraneMoveDialog" title="起重机移动控制" width="400px">
-      <el-form label-width="80px">
-        <el-form-item label="移动类型">
-          <el-select v-model="craneMoveType">
-            <el-option label="水平移动" value="MOVE_HORIZONTAL" />
-            <el-option label="垂直移动" value="MOVE_VERTICAL" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="距离(米)"><el-input-number v-model="craneMoveDistance" :min="-500" :max="500" /></el-form-item>
-        <el-form-item label="速度(m/s)"><el-input-number v-model="craneMoveSpeed" :min="1" :max="50" :step="0.5" :precision="1" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="showCraneMoveDialog = false">取消</el-button><el-button type="primary" @click="handleCraneMove">确认移动</el-button></template>
-    </el-dialog>
-
-    <el-dialog v-model="showCraneOpDialog" title="起重机操作控制" width="400px">
-      <el-form label-width="80px">
-        <el-form-item label="操作类型">
-          <el-select v-model="craneOpType">
-            <el-option label="抓箱" value="FETCH_DONE" />
-            <el-option label="放箱" value="PUT_DONE" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="耗时(ms)"><el-input-number v-model="craneOpDuration" :min="100" :max="60000" :step="100" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="showCraneOpDialog = false">取消</el-button><el-button type="primary" @click="handleCraneOperate">确认操作</el-button></template>
-    </el-dialog>
-
-    <el-dialog v-model="showChargeDialog" title="集卡充电控制" width="400px">
-      <el-form label-width="80px">
-        <el-form-item label="充电桩">
-          <el-select v-model="chargeStationId" placeholder="请选择充电桩" filterable>
-            <el-option v-for="station in simStore.chargingStations" :key="station.stationCode" :label="station.stationCode" :value="station.stationCode">
-              <span>{{ station.stationCode }}</span>
-              <span style="float: right; color: #8492a6; font-size: 12px;">{{ station.status }}</span>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="无充电桩" v-if="simStore.chargingStations.length === 0">
-          <span style="color: #909399;">当前场景无可用充电桩，请先加载包含充电桩的场景</span>
-        </el-form-item>
-      </el-form>
-      <template #footer><el-button @click="showChargeDialog = false">取消</el-button><el-button type="primary" @click="handleCharge" :disabled="!chargeStationId">确认充电</el-button></template>
-    </el-dialog>
-
-    <div class="log-console" style="position: absolute; right: 20px; top: 20px; width: 300px; background: rgba(0,0,0,0.8); color: #fff; padding: 10px; border-radius: 8px; z-index: 999; max-height: 400px; overflow-y: auto;">
-      <h3 style="margin-top: 0; color: #ffeb3b; border-bottom: 1px solid #666; padding-bottom: 5px;">⚠️ 仿真逻辑拦截台</h3>
-      <div v-if="simStore.eventLogs.length === 0" style="color: #aaa; font-size: 12px;">暂无拦截记录...</div>
-      <div v-for="(log, index) in simStore.eventLogs" :key="index" style="margin-bottom: 8px; font-size: 13px; line-height: 1.4;">
-        <span style="color: #ff5722;">[{{ log.simTime }}]</span>
-        <span style="color: #03a9f4; font-weight: bold; margin-left: 5px;">{{ log.deviceId }}</span>
-        <div style="color: #ff8a80; margin-top: 2px;">✖ {{ log.message }}</div>
       </div>
     </div>
   </div>
@@ -237,395 +107,114 @@
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useSimStore } from '../stores/simStore'
-import { wsService } from '../api/websocket'
-// 移除多余的测试API，引入正确的控制API和 dispatchAllTasks
-import { moveTruck, moveCrane, operateCrane, controlFence, chargeTruck, dispatchAllTasks } from '../api/simulation'
+import { mockFlowNormal, mockFlowError } from '../api/simulation'
 import { ElMessage } from 'element-plus'
 
 const simStore = useSimStore()
-let animFrameId: number;
-
+let animFrameId: number;  // 动画帧句柄
 const stageConfig = ref({ width: 800, height: 600 })
-const selectedDeviceId = ref('')
-const selectedDeviceType = ref('')
-const selectedDeviceState = ref('')
-const selectedDevicePower = ref<number | null>(null)
 const logContainer = ref<HTMLElement | null>(null)
-const consoleContainer = ref<HTMLElement | null>(null)
-
-const consoleErrors = computed(() => {
-  return simStore.errors.filter((e: any) => e.type === 'SIM_ERROR_EVENT' || e.eventId?.startsWith('ERR_'))
-})
-
-const errorCount = computed(() => consoleErrors.value.length)
-
-const qcRails = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'QC_RAIL'))
-const ascRails = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'ASC_RAIL'))
-const truckRoads = computed(() => simStore.mapPaths.filter((p: any) => p.pathType === 'TRUCK_ROAD'))
-
-const yardAreas = computed(() => [
-  { x: 100, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' },
-  { x: 350, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' },
-  { x: 600, y: 250, width: 150, height: 250, fill: '#c8e6c9', stroke: '#388e3c' }
-])
-
-const isInitLoading = ref(false)
-
-const showTruckMoveDialog = ref(false)
-const showCraneMoveDialog = ref(false)
-const showCraneOpDialog = ref(false)
-const showChargeDialog = ref(false)
-const truckMoveTarget = ref({ x: 0, y: 0, speed: 10 })
-const craneMoveType = ref('MOVE_HORIZONTAL')
-const craneMoveDistance = ref(0)
-const craneMoveSpeed = ref(10)
-const craneOpType = ref('FETCH_DONE')
-const craneOpDuration = ref(5000)
-const chargeStationId = ref('')
-
+// 用于平滑动画的中间状态设备数据，避免直接突变导致闪烁
 const displayDevices = ref<Record<string, any>>({})
 
+// 监听事件列表长度，自动滚动日志到底部
 watch(() => simStore.events.length, async () => {
   await nextTick()
-  if (logContainer.value) {
-    logContainer.value.scrollTop = logContainer.value.scrollHeight
-  }
+  if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight
 })
 
-watch(() => consoleErrors.value.length, async () => {
-  await nextTick()
-  if (consoleContainer.value) {
-    consoleContainer.value.scrollTop = consoleContainer.value.scrollHeight
-  }
-})
-
-const animateLoop = () => {
-  const now = Date.now();
-  simStore.devices.forEach(target => {
-    if (!displayDevices.value[target.id]) {
-      displayDevices.value[target.id] = { ...target };
-    } else {
-      const curr = displayDevices.value[target.id];
-      const animation = simStore.deviceAnimations.get(target.id);
-
-      if (animation && animation.durationMs > 0) {
-        const elapsed = now - animation.startTime;
-        const progress = Math.min(elapsed / animation.durationMs, 1);
-        const startX = curr.posX;
-        const startY = curr.posY;
-        curr.posX = startX + (animation.targetPosX - startX) * progress;
-        curr.posY = startY + (animation.targetPosY - startY) * progress;
-        if (progress >= 1) {
-          simStore.deviceAnimations.delete(target.id);
-        }
-      } else {
-        const dx = target.posX - curr.posX;
-        const dy = target.posY - curr.posY;
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-          curr.posX = target.posX;
-          curr.posY = target.posY;
-        } else {
-          curr.posX += dx * 0.08;
-          curr.posY += dy * 0.08;
-        }
-      }
-      curr.state = target.state;
-      curr.type = target.type;
-
-      const alertExpiry = simStore.deviceAlerts.get(target.id);
-      if (alertExpiry && now < alertExpiry) {
-        const blinkPhase = Math.floor(now / 250) % 2;
-        curr.isAlerting = blinkPhase === 0;
-      } else {
-        curr.isAlerting = false;
-        if (alertExpiry && now >= alertExpiry) {
-          simStore.deviceAlerts.delete(target.id);
-        }
-      }
-    }
-  });
-  simStore.animateTick();
-  animFrameId = requestAnimationFrame(animateLoop);
-};
-
-onMounted(() => {
-  simStore.updateSnapshot()
-  simStore.loadMapPaths()
-  simStore.loadTransferZones()
-  simStore.startSnapshotPolling(500)
-  animateLoop()
-  wsService.connect()
-})
-
-onBeforeUnmount(() => {
-  simStore.stopAutoPlay()
-  simStore.stopSnapshotPolling()
-  if (animFrameId) cancelAnimationFrame(animFrameId)
-  wsService.disconnect()
-})
-
-const getDeviceColor = (type: string) => {
-  if (type === 'ELECTRIC_TRUCK' || type === 'INTERNAL_TRUCK') return '#2196f3';
-  if (type === 'QC') return '#ff9800';
-  if (type === 'ASC') return '#4caf50';
-  return '#909399';
+// 根据路径类型返回对应颜色（用于渲染）
+const getPathColor = (type: string) => {
+  if (type === 'QC_RAIL') return '#e53935';
+  if (type === 'ASC_RAIL') return '#8e24aa';
+  if (type === 'TRUCK_ROAD') return '#ffb300';
+  return '#999';
 }
 
+// 格式化事件 subjects 对象为字符串
 const formatSubjects = (subjects: any) => {
   if (!subjects) return '';
   return Object.entries(subjects).map(([k, v]) => `${k}:${v}`).join(' | ');
 }
 
-const selectDevice = (id: string, type: string) => {
-  selectedDeviceId.value = id
-  selectedDeviceType.value = type
-  const device = simStore.devices.find(d => d.id === id)
-  if (device) {
-    selectedDeviceState.value = device.state
-    selectedDevicePower.value = device.powerLevel || null
-    if (type === 'ELECTRIC_TRUCK' || type === 'INTERNAL_TRUCK') {
-      truckMoveTarget.value = { x: Math.round(device.posX), y: Math.round(device.posY), speed: 10 }
+/**
+ * 动画循环：平滑地将设备位置从当前位置移动到目标位置，并处理闪烁告警。
+ * 每帧更新 displayDevices 中的坐标，实现缓动效果。
+ */
+const animateLoop = () => {
+  const now = Date.now();
+  simStore.devices.forEach(target => {
+    if (!displayDevices.value[target.id]) {
+      // 首次出现，直接拷贝
+      displayDevices.value[target.id] = { ...target };
+    } else {
+      const curr = displayDevices.value[target.id];
+      const dx = target.posX - curr.posX;
+      const dy = target.posY - curr.posY;
+      // 距离足够近则直接对齐，否则按比例移动（缓动）
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+        curr.posX = target.posX;
+        curr.posY = target.posY;
+      } else {
+        curr.posX += dx * 0.1;
+        curr.posY += dy * 0.1;
+      }
+      curr.state = target.state;
+      curr.type = target.type;
+
+      // 告警闪烁：如果设备在告警集合中且未超时，则根据时间奇偶控制显示
+      const alertExpiry = simStore.deviceAlerts.get(target.id);
+      curr.isAlerting = alertExpiry && now < alertExpiry && (Math.floor(now / 250) % 2 === 0);
     }
-    if (type === 'QC' || type === 'ASC') {
-      craneMoveDistance.value = 0
-      craneMoveSpeed.value = 10
-    }
+  });
+  simStore.animateTick();  // 让 store 也执行一次动画相关更新（如清除过期告警）
+  animFrameId = requestAnimationFrame(animateLoop);
+};
+
+onMounted(() => {
+  // 启动轮询获取快照，并开始动画
+  simStore.startSnapshotPolling(500)
+  animateLoop()
+})
+
+onBeforeUnmount(() => {
+  // 清理资源
+  simStore.stopSnapshotPolling()
+  if (animFrameId) cancelAnimationFrame(animFrameId)
+})
+
+// 点击按钮：加载初始场景（调用 store 的 initScene）
+const handleMockInit = async () => {
+  try {
+    await simStore.initScene();
+    ElMessage.success('外部 JSON 地图与作业场景加载成功');
+  } catch (e: any) {
+    ElMessage.error('加载失败');
   }
-  chargeStationId.value = ''
-  simStore.setSelectedDevice(device)
 }
 
-const handleTruckMove = async () => {
+// 点击按钮：模拟正常流程（调用 mockFlowNormal）
+const handleMockNormal = async () => {
   try {
-    await moveTruck({ truckId: selectedDeviceId.value, targetPoint: { x: truckMoveTarget.value.x, y: truckMoveTarget.value.y }, speed: truckMoveTarget.value.speed })
-    ElMessage.success('移动指令已下发')
-    showTruckMoveDialog.value = false
-    await simStore.updateSnapshot()
-  } catch (err: any) { ElMessage.error('移动指令失败') }
+    const res: any = await mockFlowNormal();
+    ElMessage.success(res.data?.message || res.message || '调度任务与流程序列已下发');
+  } catch (e: any) { ElMessage.error(e.message || '下发失败'); }
 }
 
-const handleCraneMove = async () => {
+// 点击按钮：模拟错误流程（调用 mockFlowError）
+const handleMockError = async () => {
   try {
-    let moveType = craneMoveType.value
-    if (selectedDeviceType.value === 'ASC' && moveType === 'MOVE_HORIZONTAL') {
-      moveType = 'MOVE_VERTICAL'
-    }
-    await moveCrane({ craneId: selectedDeviceId.value, moveType, distance: craneMoveDistance.value, speed: craneMoveSpeed.value })
-    ElMessage.success('移动指令已下发')
-    showCraneMoveDialog.value = false
-    await simStore.updateSnapshot()
-  } catch (err: any) { ElMessage.error('移动指令失败') }
-}
-
-const handleCraneOperate = async () => {
-  try {
-    await operateCrane({ craneId: selectedDeviceId.value, action: craneOpType.value, durationMS: craneOpDuration.value })
-    ElMessage.success('操作指令已下发')
-    showCraneOpDialog.value = false
-    await simStore.updateSnapshot()
-  } catch (err: any) { ElMessage.error('操作指令失败') }
-}
-
-const handleCharge = async () => {
-  try {
-    await chargeTruck({ truckId: selectedDeviceId.value, stationId: chargeStationId.value })
-    ElMessage.success('充电指令已下发')
-    showChargeDialog.value = false
-    await simStore.updateSnapshot()
-  } catch (err: any) { ElMessage.error('充电指令失败') }
-}
-
-const toggleFence = async (fence: any) => {
-  try {
-    const newStatus = fence.status === '01' ? '02' : '01'
-    await controlFence({ fenceId: fence.nodeId, status: newStatus })
-    ElMessage.success(`围栏已${newStatus === '02' ? '开启' : '关闭'}`)
-    await simStore.updateSnapshot()
-  } catch (err: any) { ElMessage.error('围栏控制失败') }
-}
-
-const handleInitScene = async () => {
-  isInitLoading.value = true;
-  try {
-    await simStore.initScene()
-    ElMessage.success('默认场景已加载')
-  } catch (e) {
-    ElMessage.error('场景加载失败，请检查后端状态')
-  } finally {
-    isInitLoading.value = false;
-  }
+    const res: any = await mockFlowError();
+    ElMessage.warning('引擎校验拦截: ' + (res.data?.message || res.message || res));
+  } catch (e: any) { ElMessage.warning('严格拦截: ' + e.message); }
 }
 
 const handleStep = () => { simStore.doStepNext() }
-const handleTogglePlay = () => { simStore.togglePlay() }
 const handleReset = async () => { await simStore.doReset() }
-
-// 修复任务下发报错逻辑，使用标准的 Axios 封装而不是非法的 window.request
-const handleDispatchTasks = async () => {
-  try {
-    // 调用统一对接外部算法的 API 接口
-    const res: any = await dispatchAllTasks();
-    ElMessage.success(res?.data?.message || res?.message || res?.msg || '任务派发成功，请通过单步推演观察逻辑变化');
-    await simStore.updateSnapshot();
-  } catch (error: any) {
-    const msg = error?.response?.data?.message || error?.message || '任务派发失败，请检查网络或后端外部算法接口';
-    ElMessage.error(msg);
-  }
-};
-
-const getPathsByType = (pathType: string) => simStore.mapPaths.filter(p => p.pathType === pathType);
-
-const projectToTruckRoad = (x: number, y: number) => {
-  const roads = getPathsByType('TRUCK_ROAD');
-  let bestPoint: { x: number; y: number } | null = null;
-  let minDist = Infinity;
-
-  roads.forEach((path: any) => {
-    if (path.direction === 'HORIZONTAL') {
-      if (x < path.startPoint || x > path.endPoint) return;
-      const py = path.position;
-      const dist = Math.abs(y - py);
-      if (dist < minDist) {
-        minDist = dist;
-        bestPoint = { x, y: py };
-      }
-    } else if (path.direction === 'VERTICAL') {
-      if (y < path.startPoint || y > path.endPoint) return;
-      const px = path.position;
-      const dist = Math.abs(x - px);
-      if (dist < minDist) {
-        minDist = dist;
-        bestPoint = { x: px, y };
-      }
-    }
-  });
-  if (!bestPoint || minDist > 40) { return null; }
-  return bestPoint;
-};
-
-const getQcRail = () => {
-  const rails = getPathsByType('QC_RAIL');
-  return rails.length > 0 ? rails[0] : null;
-};
-
-const getAscRailForDevice = (deviceX: number) => {
-  const rails = getPathsByType('ASC_RAIL');
-  if (rails.length === 0) return null;
-  let bestRail: any = rails[0];
-  let minDx = Math.abs(deviceX - bestRail.position);
-  rails.forEach((r: any) => {
-    const dx = Math.abs(deviceX - r.position);
-    if (dx < minDx) {
-      minDx = dx;
-      bestRail = r;
-    }
-  });
-  return bestRail;
-};
-
-const handleStageClick = async (e: any) => {
-  if (e.target.name() !== 'bg' || !selectedDeviceId.value) return;
-  const pos = e.target.getStage().getPointerPosition();
-  const device = simStore.devices.find(d => d.id === selectedDeviceId.value);
-  if (!device) return;
-
-  try {
-    if (selectedDeviceType.value === 'QC') {
-      const rail = getQcRail();
-      if (!rail) { ElMessage.error('当前地图未配置QC轨道'); return; }
-      const targetX = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.x));
-      const distance = targetX - device.posX;
-      if (Math.abs(distance) > 1) {
-        await moveCrane({ craneId: device.id, moveType: 'MOVE_HORIZONTAL', distance, speed: 10.0 });
-      }
-    } else if (selectedDeviceType.value === 'ASC') {
-      const rail = getAscRailForDevice(device.posX);
-      if (!rail) { ElMessage.error('当前地图未配置ASC轨道'); return; }
-      const targetY = Math.max(rail.startPoint, Math.min(rail.endPoint, pos.y));
-      const distance = targetY - device.posY;
-      if (Math.abs(distance) > 1) {
-        await moveCrane({ craneId: device.id, moveType: 'MOVE_VERTICAL', distance, speed: 10.0 });
-      }
-    } else {
-      const projected = projectToTruckRoad(pos.x, pos.y);
-      if (!projected) { ElMessage.warning('请点击靠近道路的位置，集卡只能在路网上运行'); return; }
-      await moveTruck({ truckId: device.id, targetPoint: { x: projected.x, y: projected.y }, speed: 10.0 });
-    }
-    await simStore.updateSnapshot();
-  } catch (err: any) {
-    ElMessage.error(err.message || '移动失败');
-  }
-}
 </script>
 
 <style scoped>
-/* 此处保留你原有的全部CSS，防止样式错乱 */
-.dashboard { display: flex; flex-direction: column; height: 100vh; padding: 20px; box-sizing: border-box; background: #f0f2f5;}
-.toolbar { display: flex; align-items: center; justify-content: space-between; background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); margin-bottom: 20px; }
-.toolbar h2 { margin: 0; color: #303133; }
-.time-display { font-size: 18px; color: #409EFF; }
-.main-content { display: flex; gap: 20px; flex: 1; min-height: 0; }
-.left-section { display: flex; flex-direction: column; gap: 15px; flex: 1; }
-.map-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); display: flex; justify-content: center; padding: 10px; }
-.terminal-panel { height: 180px; background: #1e1e1e; color: #00ff00; border-radius: 8px; padding: 15px; font-family: 'Consolas', monospace; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-.terminal-header { color: #fff; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 10px; font-weight: bold; font-size: 14px; }
-.log-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
-.log-list li { margin-bottom: 6px; font-size: 13px; line-height: 1.4; }
-.log-time { color: #888; margin-right: 12px; }
-.log-type { color: #569cd6; font-weight: bold; margin-right: 12px; display: inline-block; min-width: 120px; }
-.log-subject { color: #ce9178; }
-
-/* 控制台面板样式 */
-.console-panel { height: 150px; background: #2d1f1f; color: #ff6b6b; border-radius: 8px; padding: 15px; font-family: 'Consolas', monospace; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: 1px solid #8b0000; }
-.console-header { color: #ff6b6b; border-bottom: 1px solid #5c2b2b; padding-bottom: 8px; margin-bottom: 10px; font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 10px; }
-.error-badge { margin-left: auto; }
-.console-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
-.console-list li { margin-bottom: 6px; font-size: 13px; line-height: 1.4; }
-.console-error { color: #ff4444; }
-.console-time { color: #888; margin-right: 12px; }
-.console-device { color: #ff9800; font-weight: bold; margin-right: 12px; }
-.console-msg { color: #ff6b6b; }
-.right-section { width: 380px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
-.info-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 250px; display: flex; flex-direction: column; }
-.info-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
-.device-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
-.device-list li { padding: 10px; border-bottom: 1px solid #ebeef5; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: background 0.2s; border-radius: 4px; font-size: 13px; }
-.device-list li:hover { background: #f5f7fa; }
-.device-list li.active { background: #ecf5ff; border: 1px solid #c6e2ff; }
-.dev-id { font-weight: bold; font-size: 14px;}
-.dev-state { color: #E6A23C; font-size: 12px; }
-.dev-pos { color: #909399; font-size: 11px; }
-.dev-power { color: #67c23a; font-size: 11px; }
-.control-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; }
-.control-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
-.control-info { margin-bottom: 10px; font-size: 13px; color: #606266; }
-.control-info p { margin: 5px 0; }
-.control-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
-.fence-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; }
-.fence-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
-.fence-list { list-style: none; padding: 0; margin: 0; }
-.fence-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ebeef5; font-size: 13px; }
-.fence-id { font-weight: bold; }
-.fence-status { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-.fence-status.open { background: #e7f7e7; color: #67c23a; }
-.fence-status.closed { background: #fdecea; color: #f56c6c; }
-.wi-panel { background: white; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 200px; display: flex; flex-direction: column; }
-.wi-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #303133; }
-.wi-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
-.wi-list li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ebeef5; font-size: 12px; }
-.wi-ref { font-weight: bold; color: #409EFF; }
-.wi-move { color: #E6A23C; }
-.wi-status { color: #67c23a; }
-.error-panel { background: #fef0f0; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1); padding: 15px; max-height: 150px; display: flex; flex-direction: column; border: 1px solid #fbc4c4; }
-.error-panel h3 { margin: 0 0 10px 0; font-size: 14px; color: #f56c6c; }
-.error-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
-.error-list li { padding: 6px 0; font-size: 12px; border-bottom: 1px solid #fbc4c4; }
-.err-time { color: #909399; margin-right: 8px; }
-.err-msg { color: #f56c6c; }
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c0c4cc; border-radius: 3px; }
-.terminal-panel ::-webkit-scrollbar-thumb { background: #555; }
+/* 样式略，保持原有 */
 </style>

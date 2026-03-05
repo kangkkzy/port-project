@@ -6,7 +6,7 @@ import lombok.RequiredArgsConstructor;
 import model.dto.request.AssignTaskReq;
 import model.entity.WorkInstruction;
 import org.springframework.web.bind.annotation.*;
-import service.algorithm.TaskDecisionService;
+import service.algorithm.ExternalAlgorithmApi;
 import service.scenario.ScenarioLoaderService;
 
 @RestController
@@ -15,7 +15,7 @@ import service.scenario.ScenarioLoaderService;
 public class SimTestController {
 
     private final ScenarioLoaderService scenarioLoaderService;
-    private final TaskDecisionService taskDecisionService;
+    private final ExternalAlgorithmApi algorithmApi;
 
     @PostMapping("/load-scenario")
     public Result loadScenario(@RequestParam(defaultValue = "scenario-demo.json") String fileName) {
@@ -38,23 +38,19 @@ public class SimTestController {
     public Result dispatchAllLoadedInstructions() {
         GlobalContext ctx = GlobalContext.getInstance();
         if (ctx.getWorkInstructionMap().isEmpty()) {
-            return Result.error("当前场景中没有指令，请先加载场景");
+            return Result.error("当前场景中没有指令。请检查外部 JSON 场景文件是否包含了 workInstructions。");
         }
 
         int count = 0;
-        // 模拟外部算法：将所有场景中预设的指令转化为调度请求下发
         for (WorkInstruction wi : ctx.getWorkInstructionMap().values()) {
             AssignTaskReq req = new AssignTaskReq();
             req.setWiRefNo(wi.getWiRefNo());
-            // 假设外部算法已经分配好了集卡和岸桥/龙门吊
             req.setTruckId(wi.getCarryCheId());
             req.setCraneId(wi.getFetchCheId() != null ? wi.getFetchCheId() : wi.getPutCheId());
-
-            // 下发给引擎责任链（会进行防碰撞、堆叠拦截，通过后入队）
-            taskDecisionService.assignTask(req);
+            algorithmApi.assignTask(req);
             count++;
         }
 
-        return Result.success("已模拟外部算法派发了 " + count + " 条调度指令到引擎");
+        return Result.success("模拟外部算法成功，已通过标准 API 派发了 " + count + " 条调度指令到引擎");
     }
 }
