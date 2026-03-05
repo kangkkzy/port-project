@@ -91,21 +91,7 @@ export const chargeTruck = (data: any) => request.post('/command/truck/charge', 
 /** 为设备分配任务 */
 export const assignTask = (data: any) => request.post('/command/assign', data);
 
-// ================= 测试与辅助接口 =================
-
-/** 触发所有待分配任务（测试用） */
-export const dispatchAllTasks = () => request.post('/test/dispatch-all');
+// ================= 健康检查 =================
 
 /** 健康检查（测试后端是否存活） */
 export const healthCheck = () => request.get('/health/ping');
-
-// ================= 虚构外部算法测试专用接口 =================
-
-/** 初始化地图（用于外部算法测试） */
-export const mockInitMap = () => request.post('/mock/init-map');
-
-/** 模拟正常流程（用于外部算法测试） */
-export const mockFlowNormal = () => request.post('/mock/flow-normal');
-
-/** 模拟错误流程（用于外部算法测试） */
-export const mockFlowError = () => request.post('/mock/flow-error');

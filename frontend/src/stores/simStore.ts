@@ -4,7 +4,7 @@
 
 import { defineStore } from 'pinia';
 import {
-    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getEvents, getErrors, getMapPaths, getTransferZones, setPlaybackSpeed
+    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getMapPaths, getTransferZones, setPlaybackSpeed
 } from '../api/simulation';
 
 export const useSimStore = defineStore('simulation', {
@@ -21,18 +21,11 @@ export const useSimStore = defineStore('simulation', {
         // ---------- 日志与事件 ----------
         events: [] as any[],             // 仿真事件列表
         errors: [] as any[],             // 错误事件列表
-        lastEventSimTime: 0,             // 上次拉取事件的仿真时间戳（用于增量获取）
-        lastErrorSimTime: 0,             // 上次拉取错误的仿真时间戳
 
         // ---------- 播放控制 ----------
         isPlaying: false,                // 是否正在自动步进
         playInterval: null as any,       // 自动步进的定时器句柄
         playbackSpeed: 1.0,              // 播放速度倍率
-
-        // ---------- 轮询快照 ----------
-        isPolling: false,                // 是否正在轮询快照
-        pollIntervalMs: 500,             // 轮询间隔（毫秒）
-        pollTimer: null as any,          // 轮询定时器句柄
 
         // ---------- UI 交互 ----------
         selectedDevice: null as any,     // 当前选中的设备
@@ -64,11 +57,8 @@ export const useSimStore = defineStore('simulation', {
             try {
                 await loadScenarioFromJson('scenario-demo.json');
                 this.stopAutoPlay();
-                this.stopSnapshotPolling();
                 this.events = [];
                 this.errors = [];
-                this.lastEventSimTime = 0;
-                this.lastErrorSimTime = 0;
                 this.activeZOperations.clear();
                 await this.loadMapPaths();          // 加载地图路径
                 await this.loadTransferZones();     // 加载转运区
@@ -114,67 +104,13 @@ export const useSimStore = defineStore('simulation', {
         },
 
         /**
-         * 轮询单次执行：若不在播放模式，则更新快照并拉取日志；然后设置下一次轮询。
-         */
-        async pollTick() {
-            if (!this.isPolling) return;
-            if (!this.isPlaying) {
-                try { await this.updateSnapshot(); await this.fetchLogs(); } catch (e) {}
-            }
-            if (this.isPolling) { this.pollTimer = setTimeout(() => this.pollTick(), this.pollIntervalMs); }
-        },
-
-        /**
-         * 启动轮询快照。
-         * @param intervalMs 可选，覆盖默认轮询间隔
-         */
-        startSnapshotPolling(intervalMs?: number) {
-            if (this.isPolling) return;
-            this.isPolling = true;
-            if (intervalMs) this.pollIntervalMs = intervalMs;
-            this.pollTick();
-        },
-
-        /**
-         * 停止轮询快照。
-         */
-        stopSnapshotPolling() {
-            this.isPolling = false;
-            if (this.pollTimer) { clearTimeout(this.pollTimer); this.pollTimer = null; }
-        },
-
-        /**
-         * 增量拉取事件和错误日志，更新 events 和 errors 列表。
-         */
-        async fetchLogs() {
-            try {
-                const eventRes: any = await getEvents(this.lastEventSimTime);
-                const eventData = eventRes.data || eventRes || [];
-                if (eventData.length > 0) {
-                    this.events.push(...eventData);
-                    // 限制数组长度，防止内存泄漏
-                    if (this.events.length > 500) {
-                        this.events = this.events.slice(-500);
-                    }
-                    this.lastEventSimTime = eventData[eventData.length - 1].simTime;
-                }
-                const errorRes: any = await getErrors(this.lastErrorSimTime);
-                const errorData = errorRes.data || errorRes || [];
-                if (errorData.length > 0) {
-                    this.errors.push(...errorData);
-                    this.lastErrorSimTime = errorData[errorData.length - 1].simTime;
-                }
-            } catch (error) {}
-        },
-
-        /**
          * 执行单步步进（下一个事件）。
          */
         async doStepNext() {
             try {
+                // 直接调用后端 step，后端会通过 WebSocket 推送最新状态
                 await stepNextEvent();
-                await this.updateSnapshot();
-                await this.fetchLogs();
+                // 无需额外 HTTP 拉取 - WebSocket 会推送事件更新
             } catch (error) {}
         },
 
@@ -186,12 +122,17 @@ export const useSimStore = defineStore('simulation', {
             try {
                 await resetSimulation();
                 this.stopAutoPlay();
-                this.stopSnapshotPolling();
+                // 清空前端状态
                 this.events = [];
                 this.errors = [];
+                this.eventLogs = [];
                 this.activeZOperations.clear();
-                this.lastEventSimTime = 0;
-                this.lastErrorSimTime = 0;
+                this.deviceAlerts.clear();
+                // 重置熔断状态
+                this.isSuspended = false;
+                this.suspendedBizTypes = [];
+                this.suspendedEventIds = [];
+                // 更新一次快照获取重置后的数据
                 await this.updateSnapshot();
                 // 不再启动轮询 - 完全依赖 WebSocket 推送事件更新状态
             } catch (error) { throw error; }
@@ -316,6 +257,13 @@ export const useSimStore = defineStore('simulation', {
 
             // 处理错误事件
             if (eventData.eventType === 'SIM_ERROR_EVENT') {
+                // 强制设置熔断状态
+                this.isSuspended = true;
+                // 将引发错误的设备ID加入熔断列表
+                if (eventData.deviceId && !this.suspendedEventIds.includes(eventData.deviceId)) {
+                    this.suspendedEventIds.push(eventData.deviceId);
+                }
+                // 记录错误日志
                 this.onSimulationError(eventData.deviceId, eventData.message);
             }
         },

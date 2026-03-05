@@ -215,6 +215,14 @@ public class SimulationEngine implements InitializingBean {
                 log.error(errorMsg, e);
 
                 triggerGlobalSuspend(event);
+
+                // 通过 WebSocket 广播错误事件，通知前端熔断
+                if (webSocketService != null) {
+                    String deviceId = event.getPrimarySubject("DEVICE");
+                    if (deviceId == null) deviceId = event.getPrimarySubject("TRUCK");
+                    if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
+                    webSocketService.broadcastError(deviceId, errorMsg, event.getTriggerTime());
+                }
             }
         } else {
             log.warn("未找到事件类型 {} 的处理器，忽略执行。", event.getType());
@@ -240,8 +248,21 @@ public class SimulationEngine implements InitializingBean {
             if (bizType != null) {
                 suspendedBizTypes.add(bizType);
             }
+
+            // 通过 WebSocket 广播错误事件，通知前端熔断
+            if (webSocketService != null) {
+                String deviceId = sourceEvent.getPrimarySubject("DEVICE");
+                if (deviceId == null) deviceId = sourceEvent.getPrimarySubject("TRUCK");
+                if (deviceId == null) deviceId = sourceEvent.getPrimarySubject("CRANE");
+                String errorMsg = String.format("引擎触发全局熔断，事件ID: %s, 类型: %s", sourceEvent.getEventId(), sourceEvent.getType());
+                webSocketService.broadcastError(deviceId, errorMsg, sourceEvent.getTriggerTime());
+            }
         } else {
             log.error(">>> 仿真引擎触发全局暂停 <<< (未知事件源)");
+            // 通知前端系统级熔断
+            if (webSocketService != null) {
+                webSocketService.broadcastError("SYSTEM", "引擎触发全局熔断（未知事件源）", context.getSimTime());
+            }
         }
     }
 
@@ -322,6 +343,8 @@ public class SimulationEngine implements InitializingBean {
         globalSuspended = false;
         isRunning = false;
         isPaused = true;
+        // 清空全局上下文中的所有实体和仿真时间
+        GlobalContext.getInstance().clearAll();
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
 
@@ -467,9 +490,9 @@ public class SimulationEngine implements InitializingBean {
             // 注意：在 HTTP 驱动模式下（前端调用 tick），这里不再 sleep。
             // 前端已经通过 tick() 的间隔控制了视觉上的动画速度。
             // 只有在后端自主运行模式（isRunning == true）时才需要 syncToRealTime。
-            // if (timeSyncEnabled) {
-            //     syncToRealTime(nextEvent.getTriggerTime());
-            // }
+            if (this.timeSyncEnabled && this.isRunning) {
+                syncToRealTime(nextEvent.getTriggerTime());
+            }
 
             // 取出并处理事件
             eventQueue.poll();

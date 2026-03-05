@@ -408,6 +408,12 @@ const handleJsonFileUpload = async (event: Event) => {
       let lastSimTime = simStore.simTime;
 
       for (const cmd of testCase.commands) {
+        // Fail-Fast: 检查引擎是否已熔断，中止剩余测试脚本
+        if (simStore.isSuspended) {
+          ElMessage.error('引擎已熔断，中止剩余测试脚本');
+          break;
+        }
+
         // 计算相对时间延迟
         const timeOffset = cmd.timeOffset || 0;
         const targetSimTime = lastSimTime + timeOffset;
@@ -422,6 +428,13 @@ const handleJsonFileUpload = async (event: Event) => {
             await tick(step);
             delta -= step;
             // 让出 JS 线程，避免界面假死
+
+            // Fail-Fast: 时间分片后也检查熔断状态
+            if (simStore.isSuspended) {
+              ElMessage.error('引擎已熔断，终止快进');
+              break;
+            }
+
             await new Promise(r => setTimeout(r, 0));
           }
         }
@@ -497,7 +510,11 @@ const handleSpeedChange = (val: number) => {
   simStore.setSpeed(val)
 }
 
-const handleReset = async () => { await simStore.doReset() }
+const handleReset = async () => {
+  await simStore.doReset()
+  // 重置前端动画缓存，避免画布残影
+  displayDevices.value = {}
+}
 </script>
 
 <style scoped>

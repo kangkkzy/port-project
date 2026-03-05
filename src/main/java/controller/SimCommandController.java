@@ -32,11 +32,17 @@ public class SimCommandController {
 
     @PostMapping("/truck/move")
     public Result moveTruck(@RequestBody MoveCommandReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         return algorithmApi.moveDevice(req);
     }
 
     @PostMapping("/crane/move")
     public Result moveCrane(@RequestBody CraneMoveReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         return algorithmApi.moveCrane(req);
     }
 
@@ -44,22 +50,34 @@ public class SimCommandController {
 
     @PostMapping("/assign")
     public Result assign(@RequestBody AssignTaskReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         AssignTaskResp resp = algorithmApi.assignTask(req);
         return Result.success(resp);
     }
     // 吊起操作的接口
     @PostMapping("/crane/operate")
     public Result operateCrane(@RequestBody CraneOperationReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         return algorithmApi.operateCrane(req);
     }
     // 围栏
     @PostMapping("/fence")
     public Result controlFence(@RequestBody FenceControlReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         return algorithmApi.toggleFence(req);
     }
     // 电集卡充电
     @PostMapping("/truck/charge")
     public Result chargeTruck(@RequestBody ChargeCommandReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         return algorithmApi.chargeTruck(req);
     }
 
@@ -71,6 +89,9 @@ public class SimCommandController {
      */
     @PostMapping("/step/next-event")
     public Result stepNextEvent() {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         model.dto.snapshot.EventLogEntryDto event = algorithmApi.stepNextEvent();
         if (event == null) {
             return Result.success("没有待处理的事件");
@@ -84,6 +105,9 @@ public class SimCommandController {
      */
     @PostMapping("/tick")
     public Result tick(@RequestBody TickReq req) {
+        if (engine.isGlobalSuspended()) {
+            return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
+        }
         long deltaMs = (req != null) ? req.getDeltaMs() : 0L;
         if (deltaMs <= 0) deltaMs = 100L;
 
