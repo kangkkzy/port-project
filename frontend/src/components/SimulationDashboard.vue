@@ -82,11 +82,57 @@
       <div class="left-section">
         <!-- 画布区域：使用 Konva 渲染地图和设备 -->
         <div class="map-container" ref="mapContainerRef">
-          <v-stage :config="stageConfig">
+          <v-stage :config="stageConfig" @click="handleStageClick">
+            <!-- 背景层：渲染地图（海侧、堆场、充电站） -->
             <v-layer name="background">
-              <!-- 简单的背景色和文字示意海侧区域 -->
+              <!-- 海侧区域 -->
               <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: MAP_UI.seaSideHeight, fill: '#bbdefb' }" />
               <v-text :config="{ x: 20, y: MAP_UI.seaSideY, text: '海侧区域', fontSize: MAP_UI.seaSideFontSize, fill: '#1565c0', opacity: 0.5 }" />
+
+              <!-- 动态渲染堆场方块 -->
+              <template v-if="simStore.mapConfig?.yardBlocks">
+                <v-rect v-for="block in simStore.mapConfig.yardBlocks" :key="'yard-'+block.blockCode"
+                        :config="{
+                    x: block.x,
+                    y: block.y,
+                    width: block.width,
+                    height: block.length,
+                    fill: '#c8e6c9',
+                    stroke: '#81c784',
+                    strokeWidth: 1,
+                    opacity: 0.7
+                  }" />
+                <v-text v-for="block in simStore.mapConfig.yardBlocks" :key="'yard-text-'+block.blockCode"
+                        :config="{
+                    x: block.x + 5,
+                    y: block.y + block.length / 2 - 5,
+                    text: block.blockCode,
+                    fontSize: 10,
+                    fill: '#2e7d32',
+                    opacity: 0.8
+                  }" />
+              </template>
+
+              <!-- 动态渲染充电站 -->
+              <template v-if="simStore.mapConfig?.chargingStations">
+                <v-rect v-for="station in simStore.mapConfig.chargingStations" :key="'charge-'+station.stationCode"
+                        :config="{
+                    x: station.posX - 10,
+                    y: station.posY - 10,
+                    width: 20,
+                    height: 20,
+                    fill: '#fff59d',
+                    stroke: '#fbc02d',
+                    strokeWidth: 2
+                  }" />
+                <v-text :config="{
+                  x: station.posX - 15,
+                  y: station.posY + 12,
+                  text: station.stationCode,
+                  fontSize: 8,
+                  fill: '#f57f17'
+                }" v-for="station in simStore.mapConfig.chargingStations" :key="'charge-text-'+station.stationCode" />
+              </template>
             </v-layer>
 
             <v-layer name="rails">
@@ -112,15 +158,20 @@
 
             <v-layer name="devices">
               <!-- 渲染所有设备，并根据状态显示不同样式 -->
-              <v-group v-for="dev in displayDevices" :key="dev.id" :config="{ x: dev.posX, y: dev.posY }">
+              <v-group v-for="dev in displayDevices" :key="dev.id"
+                       :config="{ x: dev.posX, y: dev.posY }"
+                       @click="simStore.selectDevice(dev.id)">
 
-                <!-- 如果是起重机且正在 Z 轴作业，显示动画进度条 -->
-                <template v-if="(dev.type === 'QC' || dev.type === 'ASC') && simStore.activeZOperations.has(dev.id)">
-                  <v-text :config="{ x: -30, y: MAP_UI.zTextOffsetY, text: '↕ Z轴作业中', fill: '#00bcd4', fontSize: 12, fontStyle: 'bold' }" />
-                  <v-rect :config="{ x: -20, y: MAP_UI.zProgressOffsetY, width: MAP_UI.zProgressWidth, height: MAP_UI.zProgressHeight, fill: '#e0e0e0', cornerRadius: 2 }" />
-                  <!-- 使用 simTime 计算进度，确保暂停时动画也能停止 -->
-                  <v-rect :config="{ x: -20, y: MAP_UI.zProgressOffsetY, width: ((simStore.simTime % 2000) / 2000) * MAP_UI.zProgressWidth, height: MAP_UI.zProgressHeight, fill: '#00bcd4', cornerRadius: 2 }" />
-                </template>
+                <!-- 选中状态高亮边框 -->
+                <v-rect v-if="simStore.selectedDeviceId === dev.id"
+                        :config="{
+                    x: -22, y: -22,
+                    width: MAP_UI.craneSize + 4,
+                    height: MAP_UI.craneSize + 4,
+                    stroke: '#ffeb3b',
+                    strokeWidth: 3,
+                    cornerRadius: 4
+                  }" />
 
                 <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等 -->
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
@@ -137,8 +188,58 @@
                 <!-- 显示设备 ID -->
                 <v-text :config="{ x: MAP_UI.idOffsetX, y: MAP_UI.idOffsetY, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
               </v-group>
+
+              <!-- 目标位置标记（十字准星） -->
+              <v-group v-if="simStore.selectedTargetPos" :config="{ x: simStore.selectedTargetPos.x, y: simStore.selectedTargetPos.y }">
+                <v-line :config="{ points: [-10, 0, 10, 0], stroke: '#f44336', strokeWidth: 2 }" />
+                <v-line :config="{ points: [0, -10, 0, 10], stroke: '#f44336', strokeWidth: 2 }" />
+                <v-circle :config="{ radius: 5, fill: '#f44336', opacity: 0.7 }" />
+              </v-group>
             </v-layer>
           </v-stage>
+        </div>
+
+        <!-- 控制面板：手动指令调度 -->
+        <div v-if="simStore.selectedDeviceId" class="control-panel">
+          <div class="panel-header">
+            <span>控制面板 - 手动调度</span>
+            <el-button size="small" text @click="handleClearSelection">关闭</el-button>
+          </div>
+          <div class="panel-content">
+            <div class="info-row">
+              <span class="label">选中设备:</span>
+              <span class="value">{{ simStore.selectedDeviceId }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">设备类型:</span>
+              <span class="value">{{ simStore.selectedDevice?.type }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">当前位置:</span>
+              <span class="value">({{ simStore.selectedDevice?.posX }}, {{ simStore.selectedDevice?.posY }})</span>
+            </div>
+            <div class="info-row" v-if="simStore.selectedTargetPos">
+              <span class="label">目标位置:</span>
+              <span class="value highlight">({{ simStore.selectedTargetPos.x }}, {{ simStore.selectedTargetPos.y }})</span>
+            </div>
+            <div class="action-buttons">
+              <el-button
+                  type="primary"
+                  size="small"
+                  :disabled="!simStore.selectedTargetPos"
+                  @click="handleMoveToTarget"
+              >
+                移动到目标点
+              </el-button>
+              <el-button
+                  v-if="simStore.selectedDevice?.type?.includes('TRUCK')"
+                  size="small"
+                  @click="handleCharge"
+              >
+                充电
+              </el-button>
+            </div>
+          </div>
         </div>
 
         <!-- 终端日志面板：显示仿真内核事件 -->
@@ -510,6 +611,84 @@ const handleSpeedChange = (val: number) => {
   simStore.setSpeed(val)
 }
 
+// 处理画布点击事件
+const handleStageClick = (evt: any) => {
+  // 如果已经有选中的设备，则点击背景时设置目标位置
+  if (simStore.selectedDeviceId) {
+    const stage = evt.target.getStage();
+    const pointerPos = stage.getPointerPosition();
+    if (pointerPos) {
+      simStore.selectTarget(pointerPos.x, pointerPos.y);
+    }
+  }
+}
+
+// 移动选中的设备到目标位置
+const handleMoveToTarget = async () => {
+  if (!simStore.selectedDeviceId || !simStore.selectedTargetPos) {
+    ElMessage.warning('请先选中设备并选择目标位置');
+    return;
+  }
+
+  const device = simStore.selectedDevice;
+  const target = simStore.selectedTargetPos;
+
+  try {
+    if (device.type === 'ELECTRIC_TRUCK' || device.type === 'INTERNAL_TRUCK') {
+      // 调用卡车移动接口
+      await moveTruck({
+        truckId: simStore.selectedDeviceId,
+        destinationX: target.x,
+        destinationY: target.y
+      });
+      ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
+    } else if (device.type === 'QC' || device.type === 'CRANE_QC' || device.type === 'ASC' || device.type === 'CRANE_ASC') {
+      // 调用起重机移动接口
+      await moveCrane({
+        craneId: simStore.selectedDeviceId,
+        destinationX: target.x,
+        destinationY: target.y
+      });
+      ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
+    } else {
+      ElMessage.warning('不支持的设备类型');
+      return;
+    }
+    // 清空目标位置，等待 WebSocket 推送更新
+    simStore.selectedTargetPos = null;
+  } catch (e: any) {
+    ElMessage.error('发送移动指令失败: ' + e.message);
+  }
+}
+
+// 清空选中状态
+const handleClearSelection = () => {
+  simStore.clearSelection();
+}
+
+// 为选中的卡车充电
+const handleCharge = async () => {
+  if (!simStore.selectedDeviceId) {
+    ElMessage.warning('请先选中设备');
+    return;
+  }
+
+  const device = simStore.selectedDevice;
+  if (!device.type?.includes('TRUCK')) {
+    ElMessage.warning('只有卡车才能充电');
+    return;
+  }
+
+  try {
+    await chargeTruck({
+      truckId: simStore.selectedDeviceId
+    });
+    ElMessage.success(`已发送充电指令: ${simStore.selectedDeviceId}`);
+  } catch (e: any) {
+    ElMessage.error('发送充电指令失败: ' + e.message);
+  }
+}
+
 const handleReset = async () => {
   await simStore.doReset()
   // 重置前端动画缓存，避免画布残影
@@ -575,6 +754,67 @@ const handleReset = async () => {
   background: #f0f0f0;
   padding: 8px 16px;
   border-radius: 4px;
+}
+
+/* 控制面板样式 */
+.control-panel {
+  position: absolute;
+  top: 80px;
+  right: 20px;
+  width: 280px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+/* 地图容器 */
+.map-container {
+  position: relative;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #409eff;
+  color: #fff;
+  border-radius: 8px 8px 0 0;
+  font-weight: bold;
+}
+
+.panel-content {
+  padding: 16px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.info-row .label {
+  color: #666;
+}
+
+.info-row .value {
+  color: #333;
+  font-weight: 500;
+}
+
+.info-row .value.highlight {
+  color: #f44336;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 /* 日志过滤样式 */

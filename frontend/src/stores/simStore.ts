@@ -4,7 +4,7 @@
 
 import { defineStore } from 'pinia';
 import {
-    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getMapPaths, getTransferZones, setPlaybackSpeed
+    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getMapConfig, getMapPaths, getTransferZones, setPlaybackSpeed
 } from '../api/simulation';
 
 export const useSimStore = defineStore('simulation', {
@@ -29,8 +29,11 @@ export const useSimStore = defineStore('simulation', {
 
         // ---------- UI 交互 ----------
         selectedDevice: null as any,     // 当前选中的设备
+        selectedDeviceId: null as string | null,  // 当前选中的设备ID
+        selectedTargetPos: null as { x: number, y: number } | null,  // 当前选中的目标位置
 
         // ---------- 地图数据 ----------
+        mapConfig: null as any,            // 地图配置（堆场、充电站、路径等）
         mapPaths: [] as any[],           // 地图路径（轨道/道路）
         transferZones: [] as any[],      // 转运区信息
 
@@ -60,11 +63,21 @@ export const useSimStore = defineStore('simulation', {
                 this.events = [];
                 this.errors = [];
                 this.activeZOperations.clear();
-                await this.loadMapPaths();          // 加载地图路径
-                await this.loadTransferZones();     // 加载转运区
-                await this.updateSnapshot();        // 获取一次快照用于铺底（仅此时调用）
+                // 先加载地图配置，再加载路径和转运区
+                await this.loadMapConfig();
+                await this.loadMapPaths();
+                await this.loadTransferZones();
+                await this.updateSnapshot();
                 // 不再启动轮询 - 完全依赖 WebSocket 推送事件更新状态
             } catch (error) { throw error; }
+        },
+
+        /** 加载地图配置（堆场、充电站、路径等） */
+        async loadMapConfig() {
+            try {
+                const res: any = await getMapConfig();
+                this.mapConfig = res.data || res;
+            } catch (error) {}
         },
 
         /**
@@ -179,6 +192,26 @@ export const useSimStore = defineStore('simulation', {
         // 设备选择相关
         setSelectedDevice(device: any) { this.selectedDevice = device; },
         clearSelectedDevice() { this.selectedDevice = null; },
+
+        /** 选中指定设备 */
+        selectDevice(deviceId: string) {
+            this.selectedDeviceId = deviceId;
+            this.selectedDevice = this.devices.find(d => d.id === deviceId) || null;
+            // 选中设备时清空目标位置
+            this.selectedTargetPos = null;
+        },
+
+        /** 选中目标位置 */
+        selectTarget(x: number, y: number) {
+            this.selectedTargetPos = { x, y };
+        },
+
+        /** 清空选中状态 */
+        clearSelection() {
+            this.selectedDeviceId = null;
+            this.selectedDevice = null;
+            this.selectedTargetPos = null;
+        },
 
         /**
          * 手动刷新快照（用于断线重连后获取全量数据铺底）。

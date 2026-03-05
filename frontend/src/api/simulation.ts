@@ -12,6 +12,9 @@ import request from './request';
 /** 获取当前仿真状态的快照 */
 export const getSnapshot = () => request.get('/state/snapshot');
 
+/** 获取地图配置（堆场、充电站、路径等） */
+export const getMapConfig = () => request.get('/map/config');
+
 /** 设置仿真播放速度 */
 export const setPlaybackSpeed = (speed: number) => request.post('/state/speed', null, { params: { speed } });
 
