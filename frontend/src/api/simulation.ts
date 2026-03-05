@@ -15,10 +15,16 @@ export const stepNextEvent = () => request.post('/command/step/next-event');
 export const tick = (deltaMs: number = 100) => request.post('/command/tick', { deltaMs });
 export const stepWithCommands = (data: any) => request.post('/command/stepWithCommands', data);
 
-// ================= 后台管理 =================
-export const resetSimulation = () => request.post('/admin/reset');
-export const initSimulation = () => request.post('/admin/init');
-export const loadScenario = (data: any) => request.post('/admin/load', data);
+// ================= 后台管理 (已修复404路径问题) =================
+// 对应后端 SimAdminController 的 @RequestMapping("/sim/engine")
+export const resetSimulation = () => request.post('/engine/reset');
+export const initSimulation = () => request.post('/engine/init');
+export const loadScenario = (data: any) => request.post('/engine/load', data);
+
+// ================= 场景加载 (JSON文件驱动) =================
+// 对应后端 ScenarioController 的 @RequestMapping("/sim/scenario")
+export const loadScenarioFromJson = (fileName: string) =>
+    request.post('/scenario/load', null, { params: { fileName } });
 
 // ================= 日志查询 =================
 export const getEvents = (sinceSimTime: number = 0) => request.get('/events', { params: { since: sinceSimTime } });
