@@ -180,10 +180,12 @@
               <!-- 渲染所有设备，并根据状态显示不同样式 -->
               <v-group v-for="dev in displayDevices" :key="dev.id"
                        :config="{ x: dev.posX, y: dev.posY }"
-                       @click="simStore.selectDevice(dev.id)">
+                       @click="(e) => { e.cancelBubble = true; simStore.selectDevice(dev.deviceId || dev.id); }"
+                       @mouseenter="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'pointer'; }"
+                       @mouseleave="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'default'; }">
 
                 <!-- 选中状态高亮边框 -->
-                <v-rect v-if="simStore.selectedDeviceId === dev.id"
+                <v-rect v-if="simStore.selectedDeviceId === (dev.deviceId || dev.id)"
                         :config="{
                     x: -22, y: -22,
                     width: MAP_UI.craneSize + 4,
@@ -193,16 +195,16 @@
                     cornerRadius: 4
                   }" />
 
-                <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等 -->
+                <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等，扩大热区 -->
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
-                  <v-rect :config="{ x: -20, y: -20, width: MAP_UI.craneSize, height: MAP_UI.craneSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4 }" />
+                  <v-rect :config="{ x: -20, y: -20, width: MAP_UI.craneSize, height: MAP_UI.craneSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4, hitStrokeWidth: 15 }" />
                   <v-circle :config="{ x: 0, y: 0, radius: 5, fill: dev.isAlerting ? '#ff0000' : '#ff9800' }" />
                 </template>
                 <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
-                  <v-rect :config="{ x: -15, y: -15, width: MAP_UI.ascSize, height: MAP_UI.ascSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4 }" />
+                  <v-rect :config="{ x: -15, y: -15, width: MAP_UI.ascSize, height: MAP_UI.ascSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4, hitStrokeWidth: 15 }" />
                 </template>
                 <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
-                  <v-rect :config="{ x: -12, y: -6, width: MAP_UI.truckWidth, height: MAP_UI.truckHeight, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2 }" />
+                  <v-rect :config="{ x: -12, y: -6, width: MAP_UI.truckWidth, height: MAP_UI.truckHeight, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2, hitStrokeWidth: 15 }" />
                 </template>
 
                 <!-- 显示设备 ID -->
@@ -235,12 +237,21 @@
         </div>
 
         <!-- 控制面板：手动指令调度 -->
-        <div v-if="simStore.selectedDeviceId" class="control-panel">
-          <div class="panel-header">
-            <span>控制面板 - 手动调度</span>
-            <el-button size="small" text @click="handleClearSelection">关闭</el-button>
-          </div>
-          <div class="panel-content">
+        <div class="control-panel" :class="{ 'has-device': simStore.selectedDeviceId }">
+          <!-- 场景未加载警告 -->
+          <el-alert v-if="Object.keys(displayDevices).length === 0"
+                    title="当前场景未加载任何设备"
+                    type="error"
+                    description="请先上传 Scenario 脚本或通过后端接口初始化场景"
+                    :closable="false"
+                    show-icon>
+          </el-alert>
+
+          <div v-if="simStore.selectedDeviceId" class="panel-content">
+            <div class="panel-header">
+              <span>控制面板 - 手动调度</span>
+              <el-button size="small" text @click="handleClearSelection">关闭</el-button>
+            </div>
             <div class="info-row">
               <span class="label">选中设备:</span>
               <span class="value">{{ simStore.selectedDeviceId }}</span>
@@ -894,13 +905,25 @@ const handleReset = async () => {
 /* 控制面板样式 */
 .control-panel {
   position: absolute;
-  top: 80px;
+  top: 20px;
   right: 20px;
-  width: 280px;
+  width: 350px;
+  max-height: 85vh;
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.95);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
   z-index: 100;
+}
+
+/* 没有选中设备时隐藏内容 */
+.control-panel .panel-content {
+  display: none;
+}
+
+/* 选中设备时显示内容 */
+.control-panel.has-device .panel-content {
+  display: block;
 }
 
 /* 地图容器 */
@@ -909,6 +932,19 @@ const handleReset = async () => {
   background: #f5f5f5;
   border: 1px solid #ddd;
   border-radius: 4px;
+}
+
+/* 终端日志面板样式 */
+.terminal-panel {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 400px;
+  max-height: 30vh;
+  overflow-y: auto;
+  background: rgba(30, 30, 30, 0.85);
+  border-radius: 8px;
+  z-index: 100;
 }
 
 .panel-header {

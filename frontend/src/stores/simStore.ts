@@ -196,8 +196,10 @@ export const useSimStore = defineStore('simulation', {
 
         /** 选中指定设备 */
         selectDevice(deviceId: string) {
+            // 尝试通过 id 或 deviceId 查找设备
+            const device = this.devices.find(d => d.id === deviceId || d.deviceId === deviceId);
             this.selectedDeviceId = deviceId;
-            this.selectedDevice = this.devices.find(d => d.id === deviceId) || null;
+            this.selectedDevice = device || null;
             // 选中设备时清空目标位置
             this.selectedTargetPos = null;
         },
