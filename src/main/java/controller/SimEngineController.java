@@ -18,7 +18,7 @@ public class SimEngineController {
     @PostMapping("/step")
     public Result step() {
         // 安全调用引擎向外暴露的单步执行方法
-        SimEvent executedEvent = engine.stepExecution();
+        SimEvent executedEvent = engine.step();
         if (executedEvent != null) {
             return Result.success("执行了一个仿真事件", executedEvent.getType().name());
         }

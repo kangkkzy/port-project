@@ -2,11 +2,14 @@ package controller;
 
 import common.Result;
 import common.consts.DeviceStateEnum;
+import engine.SimulationEngine;
 import engine.context.GlobalContext;
 import model.dto.snapshot.*;
 import model.entity.*;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
@@ -20,6 +23,12 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/sim/state")
 public class SimStateController {
+
+    private final SimulationEngine engine;
+
+    public SimStateController(SimulationEngine engine) {
+        this.engine = engine;
+    }
 
     /**
      * 调试用：返回整个 GlobalContext，包含所有内部状态
@@ -38,6 +47,15 @@ public class SimStateController {
         PortSnapshotDto snapshot = new PortSnapshotDto();
         snapshot.setSimTime(ctx.getSimTime());
 
+        // 添加引擎熔断状态
+        snapshot.setGlobalSuspended(engine.isGlobalSuspended());
+        // 将枚举类型转换为字符串，便于前端展示
+        java.util.Set<String> bizTypes = engine.getSuspendedBizTypes().stream()
+                .map(Enum::name)
+                .collect(java.util.stream.Collectors.toSet());
+        snapshot.setSuspendedBizTypes(bizTypes);
+        snapshot.setSuspendedEventIds(engine.getSuspendedEventIds());
+
         // 组装各类实体的快照数据
         snapshot.setDevices(buildDeviceSnapshots(ctx));
         snapshot.setFences(buildFenceSnapshots(ctx));
@@ -47,6 +65,27 @@ public class SimStateController {
         snapshot.setContainers(buildContainerSnapshots(ctx));
 
         return Result.success("查询成功", snapshot);
+    }
+
+    /**
+     * 设置仿真播放速度
+     * @param speed 速度倍率 (0.1 - 10.0)
+     */
+    @PostMapping("/speed")
+    public Result setPlaybackSpeed(@RequestParam(defaultValue = "1.0") double speed) {
+        if (speed < 0.1 || speed > 10.0) {
+            return Result.error("速度范围应在 0.1 - 10.0 之间");
+        }
+        engine.setPlaybackSpeed(speed);
+        return Result.success("播放速度已设置为 " + speed + "x");
+    }
+
+    /**
+     * 获取当前播放速度
+     */
+    @GetMapping("/speed")
+    public Result getPlaybackSpeed() {
+        return Result.success("当前播放速度", engine.getPlaybackSpeed());
     }
 
     /**

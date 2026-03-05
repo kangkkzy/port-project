@@ -12,6 +12,12 @@ import request from './request';
 /** 获取当前仿真状态的快照 */
 export const getSnapshot = () => request.get('/state/snapshot');
 
+/** 设置仿真播放速度 */
+export const setPlaybackSpeed = (speed: number) => request.post('/state/speed', null, { params: { speed } });
+
+/** 获取当前播放速度 */
+export const getPlaybackSpeed = () => request.get('/state/speed');
+
 /** 获取地图路径列表（通常用于绘制） */
 export const getMapPaths = () => request.get('/map/paths');
 

@@ -13,6 +13,21 @@ import SockJS from 'sockjs-client';
 import { Client } from '@stomp/stompjs';
 
 /**
+ * 获取 WebSocket 服务器地址
+ * 优先使用环境变量，否则根据当前 window.location 动态拼接
+ */
+function getWebSocketUrl(): string {
+    const envUrl = import.meta.env.VITE_WS_URL;
+    if (envUrl) {
+        return envUrl;
+    }
+    // 降级方案：根据当前页面地址动态拼接
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    const host = window.location.host;
+    return `${protocol}//${host}/ws-sim`;
+}
+
+/**
  * WebSocket 服务类
  * 单例模式，通过 wsService 实例对外提供服务。
  */
@@ -34,8 +49,8 @@ class SimulationWebSocketService {
 
         // 配置 STOMP 客户端
         this.client = new Client({
-            // 使用 SockJS 创建 WebSocket 连接
-            webSocketFactory: () => new SockJS('http://localhost:8080/ws-sim'),
+            // 使用 SockJS 创建 WebSocket 连接，从环境变量或动态获取
+            webSocketFactory: () => new SockJS(getWebSocketUrl()),
             reconnectDelay: 5000,              // 自动重连延迟
             heartbeatIncoming: 4000,            // 接收心跳间隔
             heartbeatOutgoing: 4000,             // 发送心跳间隔

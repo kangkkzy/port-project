@@ -225,7 +225,7 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
     @Override
     public model.dto.snapshot.EventLogEntryDto stepNextEvent() {
         synchronized (context) {
-            SimEvent processedEvent = engine.stepNextEvent();
+            SimEvent processedEvent = engine.step();
             if (processedEvent == null) {
                 return null;
             }

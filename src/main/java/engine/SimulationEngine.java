@@ -416,34 +416,6 @@ public class SimulationEngine implements InitializingBean {
         return nextEvent;
     }
 
-    /**
-     * 单步执行下一个事件（简化版，不检查运行状态，用于内部或批量调用）。
-     * 此方法与 step() 功能类似，但省略了 isRunning 检查，适合在引擎停止时手动调用。
-     * 建议外部使用 step() 以确保状态一致性。
-     *
-     * @return 执行的事件，若无则返回 null
-     * @deprecated 推荐使用 {@link #step()}
-     */
-    @Deprecated
-    public synchronized SimEvent stepNextEvent() {
-        if (globalSuspended) {
-            log.warn("拒绝执行：引擎处于全局暂停状态。");
-            return null;
-        }
-
-        if (eventQueue.isEmpty()) {
-            return null;
-        }
-
-        SimEvent nextEvent = eventQueue.poll();
-        if (nextEvent == null) {
-            return null;
-        }
-
-        processEvent(nextEvent);
-        return nextEvent;
-    }
-
     // -------------------- 连续运行 --------------------
 
     /**

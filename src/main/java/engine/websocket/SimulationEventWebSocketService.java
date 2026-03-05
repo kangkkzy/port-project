@@ -10,8 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * WebSocket 消息推送服务，负责将仿真事件广播给前端。
@@ -25,18 +24,25 @@ public class SimulationEventWebSocketService {
     private final SimpMessagingTemplate messagingTemplate;
 
     /**
+     * 需要广播的事件类型集合（只有这些事件才推给前端，避免刷屏）
+     */
+    private static final Set<EventTypeEnum> BROADCAST_EVENTS = Collections.unmodifiableSet(
+            new HashSet<>(java.util.Arrays.asList(
+                    EventTypeEnum.MOVE_START,
+                    EventTypeEnum.ARRIVAL,
+                    EventTypeEnum.FETCH_DONE,
+                    EventTypeEnum.PUT_DONE
+            ))
+    );
+
+    /**
      * 广播仿真事件（仅限特定类型的事件才会推送，避免刷屏）
      * @param event 仿真事件对象
      */
     public void broadcast(SimEvent event) {
         if (event == null) return;
 
-        // 定义需要广播的事件类型集合（只有这些事件才推给前端）
-        java.util.Set<EventTypeEnum> BROADCAST_EVENTS = new java.util.HashSet<>();
-        BROADCAST_EVENTS.add(EventTypeEnum.MOVE_START);
-        BROADCAST_EVENTS.add(EventTypeEnum.ARRIVAL);
-        BROADCAST_EVENTS.add(EventTypeEnum.FETCH_DONE);
-        BROADCAST_EVENTS.add(EventTypeEnum.PUT_DONE);
+        // 检查事件类型是否在广播列表中
         if (!BROADCAST_EVENTS.contains(event.getType())) return;
 
         // 从事件中获取主体设备ID
