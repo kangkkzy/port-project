@@ -82,7 +82,11 @@
       <div class="left-section">
         <!-- 画布区域：使用 Konva 渲染地图和设备 -->
         <div class="map-container" ref="mapContainerRef">
-          <v-stage :config="stageConfig" @click="handleStageClick">
+          <v-stage :config="stageConfig"
+                   @click="handleStageClick"
+                   @dragstart="handleStageDragStart"
+                   @dragend="handleStageDragEnd"
+                   @wheel="handleWheel">
             <!-- 背景层：渲染地图（海侧、堆场、充电站） -->
             <v-layer name="background">
               <!-- 海侧区域 -->
@@ -93,8 +97,8 @@
               <template v-if="simStore.mapConfig?.yardBlocks">
                 <v-rect v-for="block in simStore.mapConfig.yardBlocks" :key="'yard-'+block.blockCode"
                         :config="{
-                    x: block.x,
-                    y: block.y,
+                    x: block.posX,
+                    y: block.posY,
                     width: block.width,
                     height: block.length,
                     fill: '#c8e6c9',
@@ -104,8 +108,8 @@
                   }" />
                 <v-text v-for="block in simStore.mapConfig.yardBlocks" :key="'yard-text-'+block.blockCode"
                         :config="{
-                    x: block.x + 5,
-                    y: block.y + block.length / 2 - 5,
+                    x: block.posX + 5,
+                    y: block.posY + block.length / 2 - 5,
                     text: block.blockCode,
                     fontSize: 10,
                     fill: '#2e7d32',
@@ -132,6 +136,22 @@
                   fontSize: 8,
                   fill: '#f57f17'
                 }" v-for="station in simStore.mapConfig.chargingStations" :key="'charge-text-'+station.stationCode" />
+              </template>
+            </v-layer>
+
+            <!-- 动态渲染地图路径（来自 mapConfig.paths） -->
+            <v-layer name="map-paths">
+              <template v-if="simStore.mapConfig?.paths">
+                <v-line v-for="(path, idx) in simStore.mapConfig.paths" :key="'mpath-'+idx"
+                        :config="{
+                    points: flattenPathNodes(path.nodes),
+                    stroke: path.pathType === 'TRUCK_ROAD' ? '#9e9e9e' : '#78909c',
+                    strokeWidth: path.pathType === 'TRUCK_ROAD' ? 3 : 2,
+                    dash: path.pathType === 'TRUCK_ROAD' ? [] : [8, 4],
+                    opacity: 0.8,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                  }" />
               </template>
             </v-layer>
 
@@ -189,12 +209,27 @@
                 <v-text :config="{ x: MAP_UI.idOffsetX, y: MAP_UI.idOffsetY, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
               </v-group>
 
-              <!-- 目标位置标记（十字准星） -->
+              <!-- 目标位置标记（十字准星）和移动指令连线 -->
               <v-group v-if="simStore.selectedTargetPos" :config="{ x: simStore.selectedTargetPos.x, y: simStore.selectedTargetPos.y }">
                 <v-line :config="{ points: [-10, 0, 10, 0], stroke: '#f44336', strokeWidth: 2 }" />
                 <v-line :config="{ points: [0, -10, 0, 10], stroke: '#f44336', strokeWidth: 2 }" />
                 <v-circle :config="{ radius: 5, fill: '#f44336', opacity: 0.7 }" />
               </v-group>
+
+              <!-- 移动指令连线（绿色虚线） -->
+              <v-line v-if="simStore.pendingMoveCommand"
+                      :config="{
+                  points: [
+                    simStore.pendingMoveCommand.fromX,
+                    simStore.pendingMoveCommand.fromY,
+                    simStore.pendingMoveCommand.toX,
+                    simStore.pendingMoveCommand.toY
+                  ],
+                  stroke: '#4caf50',
+                  strokeWidth: 2,
+                  dash: [8, 4],
+                  opacity: 0.8
+                }" />
             </v-layer>
           </v-stage>
         </div>
@@ -321,13 +356,24 @@ const MAP_UI = {
 
 const simStore = useSimStore()
 let animFrameId: number;  // 动画帧句柄
-const stageConfig = ref({ width: 800, height: 600 })
+const stageConfig = ref({
+  width: 800,
+  height: 600,
+  draggable: true,
+  scaleX: 1,
+  scaleY: 1,
+  x: 0,
+  y: 0
+})
 const logContainer = ref<HTMLElement | null>(null)
 const mapContainerRef = ref<HTMLElement | null>(null)
 const jsonFileInput = ref<HTMLInputElement | null>(null)
 const playbackSpeed = ref(1.0)
 const lastFrameTime = ref(0)
 const logFilter = ref<'all' | 'movement' | 'crane'>('all')
+// 用于区分拖拽和点击
+const isDragging = ref(false)
+const dragStartPos = ref({ x: 0, y: 0 })
 // 用于平滑动画的中间状态设备数据，避免直接突变导致闪烁
 const displayDevices = ref<Record<string, any>>({})
 
@@ -342,7 +388,17 @@ const getPathColor = (type: string) => {
   if (type === 'QC_RAIL') return '#e53935';
   if (type === 'ASC_RAIL') return '#8e24aa';
   if (type === 'TRUCK_ROAD') return '#ffb300';
-  return '#999';
+  return '#999'
+}
+
+// 将节点数组展平为 Konva points 格式 [x1, y1, x2, y2, ...]
+const flattenPathNodes = (nodes: { x: number, y: number }[]): number[] => {
+  if (!nodes || nodes.length === 0) return []
+  const points: number[] = []
+  nodes.forEach(node => {
+    points.push(node.x, node.y)
+  })
+  return points
 }
 
 // 计算属性：根据过滤条件返回日志
@@ -613,6 +669,12 @@ const handleSpeedChange = (val: number) => {
 
 // 处理画布点击事件
 const handleStageClick = (evt: any) => {
+  // 如果在拖拽过程中或刚结束拖拽，则不触发选择目标
+  if (isDragging.value) {
+    isDragging.value = false
+    return
+  }
+
   // 如果已经有选中的设备，则点击背景时设置目标位置
   if (simStore.selectedDeviceId) {
     const stage = evt.target.getStage();
@@ -621,6 +683,66 @@ const handleStageClick = (evt: any) => {
       simStore.selectTarget(pointerPos.x, pointerPos.y);
     }
   }
+}
+
+// 处理拖拽开始
+const handleStageDragStart = (evt: any) => {
+  isDragging.value = true
+  const stage = evt.target.getStage()
+  const pos = stage.getPointerPosition()
+  if (pos) {
+    dragStartPos.value = { x: pos.x, y: pos.y }
+  }
+}
+
+// 处理拖拽结束
+const handleStageDragEnd = (evt: any) => {
+  // 拖拽结束后短暂设置标志，防止触发点击
+  setTimeout(() => {
+    isDragging.value = false
+  }, 100)
+}
+
+// 处理鼠标滚轮缩放
+const handleWheel = (evt: any) => {
+  evt.evt.preventDefault()
+
+  const stage = evt.target.getStage()
+  const oldScale = stage.scaleX()
+
+  const pointer = stage.getPointerPosition()
+  if (!pointer) return
+
+  const scaleBy = 1.1
+  const direction = evt.evt.deltaY > 0 ? -1 : 1
+
+  // 计算新缩放比例
+  const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy
+
+  // 限制缩放范围
+  if (newScale < 0.1 || newScale > 5) return
+
+  // 计算鼠标在原始坐标系中的位置
+  const mousePointTo = {
+    x: (pointer.x - stage.x()) / oldScale,
+    y: (pointer.y - stage.y()) / oldScale,
+  }
+
+  // 计算新的 stage 位置，使鼠标位置保持不变
+  const newPos = {
+    x: pointer.x - mousePointTo.x * newScale,
+    y: pointer.y - mousePointTo.y * newScale,
+  }
+
+  // 更新 stage 配置
+  stage.scale({ x: newScale, y: newScale })
+  stage.position(newPos)
+
+  // 更新响应式配置
+  stageConfig.value.scaleX = newScale
+  stageConfig.value.scaleY = newScale
+  stageConfig.value.x = newPos.x
+  stageConfig.value.y = newPos.y
 }
 
 // 移动选中的设备到目标位置
@@ -637,25 +759,38 @@ const handleMoveToTarget = async () => {
     if (device.type === 'ELECTRIC_TRUCK' || device.type === 'INTERNAL_TRUCK') {
       // 调用卡车移动接口
       await moveTruck({
-        truckId: simStore.selectedDeviceId,
+        deviceId: simStore.selectedDeviceId,
         destinationX: target.x,
         destinationY: target.y
       });
+      // 记录下发指令的设备位置，用于显示连线
+      simStore.pendingMoveCommand = {
+        fromX: device.posX,
+        fromY: device.posY,
+        toX: target.x,
+        toY: target.y
+      };
       ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
     } else if (device.type === 'QC' || device.type === 'CRANE_QC' || device.type === 'ASC' || device.type === 'CRANE_ASC') {
       // 调用起重机移动接口
       await moveCrane({
-        craneId: simStore.selectedDeviceId,
+        deviceId: simStore.selectedDeviceId,
         destinationX: target.x,
         destinationY: target.y
       });
+      // 记录下发指令的设备位置，用于显示连线
+      simStore.pendingMoveCommand = {
+        fromX: device.posX,
+        fromY: device.posY,
+        toX: target.x,
+        toY: target.y
+      };
       ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
     } else {
       ElMessage.warning('不支持的设备类型');
       return;
     }
-    // 清空目标位置，等待 WebSocket 推送更新
-    simStore.selectedTargetPos = null;
+    // 不立即清空目标位置，等待 WebSocket 推送更新后自动清除
   } catch (e: any) {
     ElMessage.error('发送移动指令失败: ' + e.message);
   }
@@ -681,7 +816,7 @@ const handleCharge = async () => {
 
   try {
     await chargeTruck({
-      truckId: simStore.selectedDeviceId
+      deviceId: simStore.selectedDeviceId
     });
     ElMessage.success(`已发送充电指令: ${simStore.selectedDeviceId}`);
   } catch (e: any) {
