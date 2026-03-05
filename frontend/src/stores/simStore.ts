@@ -205,9 +205,10 @@ export const useSimStore = defineStore('simulation', {
         async playTick() {
             if (!this.isPlaying) return;
             try {
-                await tick(100);
-                // 仅增量拉取日志，不获取全量快照（位置由 WS 推送更新）
-                await this.fetchLogs();
+                // 倍速控制：每 100ms 真实时间推进 playbackSpeed 倍的仿真时间
+                const stepMs = Math.round(100 * this.playbackSpeed);
+                await tick(stepMs);
+                // 不再调用 fetchLogs - WebSocket 已推送事件，避免重复
             } catch (e) {}
             if (this.isPlaying) { this.playInterval = setTimeout(() => this.playTick(), 100); }
         },

@@ -72,7 +72,7 @@
         </div>
       </div>
       <div class="time-display">
-        当前时钟: <strong>{{ simStore.simTime }}</strong> ms
+        当前时钟: <strong>{{ formatSimTime(simStore.simTime) }}</strong>
         <span style="margin-left: 20px; color: #666;">(WS: {{ wsService.connected.value ? '已连接' : '未连接' }})</span>
         <span v-if="simStore.isSuspended" style="margin-left: 20px; color: #f00; font-weight: bold;">⚠️ 已熔断</span>
       </div>
@@ -85,8 +85,8 @@
           <v-stage :config="stageConfig">
             <v-layer name="background">
               <!-- 简单的背景色和文字示意海侧区域 -->
-              <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: 100, fill: '#bbdefb' }" />
-              <v-text :config="{ x: 20, y: 40, text: '海侧区域', fontSize: 24, fill: '#1565c0', opacity: 0.5 }" />
+              <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: MAP_UI.seaSideHeight, fill: '#bbdefb' }" />
+              <v-text :config="{ x: 20, y: MAP_UI.seaSideY, text: '海侧区域', fontSize: MAP_UI.seaSideFontSize, fill: '#1565c0', opacity: 0.5 }" />
             </v-layer>
 
             <v-layer name="rails">
@@ -97,7 +97,7 @@
                           ? [path.startPoint, path.position, path.endPoint, path.position]
                           : [path.position, path.startPoint, path.position, path.endPoint],
                   stroke: getPathColor(path.pathType),
-                  strokeWidth: path.pathType === 'TRUCK_ROAD' ? 8 : 3,
+                  strokeWidth: path.pathType === 'TRUCK_ROAD' ? MAP_UI.truckRoadWidth : MAP_UI.railWidth,
                   dash: path.pathType === 'TRUCK_ROAD' ? [] : [15, 10],
                   opacity: 0.7
                 }" />
@@ -116,26 +116,26 @@
 
                 <!-- 如果是起重机且正在 Z 轴作业，显示动画进度条 -->
                 <template v-if="(dev.type === 'QC' || dev.type === 'ASC') && simStore.activeZOperations.has(dev.id)">
-                  <v-text :config="{ x: -30, y: -45, text: '↕ Z轴作业中', fill: '#00bcd4', fontSize: 12, fontStyle: 'bold' }" />
-                  <v-rect :config="{ x: -20, y: -30, width: 40, height: 5, fill: '#e0e0e0', cornerRadius: 2 }" />
+                  <v-text :config="{ x: -30, y: MAP_UI.zTextOffsetY, text: '↕ Z轴作业中', fill: '#00bcd4', fontSize: 12, fontStyle: 'bold' }" />
+                  <v-rect :config="{ x: -20, y: MAP_UI.zProgressOffsetY, width: MAP_UI.zProgressWidth, height: MAP_UI.zProgressHeight, fill: '#e0e0e0', cornerRadius: 2 }" />
                   <!-- 使用 simTime 计算进度，确保暂停时动画也能停止 -->
-                  <v-rect :config="{ x: -20, y: -30, width: ((simStore.simTime % 2000) / 2000) * 40, height: 5, fill: '#00bcd4', cornerRadius: 2 }" />
+                  <v-rect :config="{ x: -20, y: MAP_UI.zProgressOffsetY, width: ((simStore.simTime % 2000) / 2000) * MAP_UI.zProgressWidth, height: MAP_UI.zProgressHeight, fill: '#00bcd4', cornerRadius: 2 }" />
                 </template>
 
                 <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等 -->
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
-                  <v-rect :config="{ x: -20, y: -20, width: 40, height: 40, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4 }" />
+                  <v-rect :config="{ x: -20, y: -20, width: MAP_UI.craneSize, height: MAP_UI.craneSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4 }" />
                   <v-circle :config="{ x: 0, y: 0, radius: 5, fill: dev.isAlerting ? '#ff0000' : '#ff9800' }" />
                 </template>
                 <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
-                  <v-rect :config="{ x: -15, y: -15, width: 30, height: 30, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4 }" />
+                  <v-rect :config="{ x: -15, y: -15, width: MAP_UI.ascSize, height: MAP_UI.ascSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4 }" />
                 </template>
                 <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
-                  <v-rect :config="{ x: -12, y: -6, width: 24, height: 12, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2 }" />
+                  <v-rect :config="{ x: -12, y: -6, width: MAP_UI.truckWidth, height: MAP_UI.truckHeight, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2 }" />
                 </template>
 
                 <!-- 显示设备 ID -->
-                <v-text :config="{ x: -25, y: 25, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
+                <v-text :config="{ x: MAP_UI.idOffsetX, y: MAP_UI.idOffsetY, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
               </v-group>
             </v-layer>
           </v-stage>
@@ -161,7 +161,7 @@
           <div class="terminal-header">> 离散事件引擎内核日志 (Discrete Event Engine Logs)</div>
           <ul class="log-list" ref="logContainer">
             <li v-for="log in filteredEvents" :key="log.eventId">
-              <span class="log-time">[{{ log.simTime }}ms]</span>
+              <span class="log-time">[{{ formatSimTime(log.simTime) }}]</span>
               <span class="log-type">{{ log.type }}</span>
               <span class="log-subject">{{ formatSubjects(log.subjects) }}</span>
             </li>
@@ -190,6 +190,33 @@ import { useSimStore } from '../stores/simStore'
 import { loadScenarioFromJson, stepNextEvent, tick, moveTruck, moveCrane, operateCrane, assignTask, controlFence, chargeTruck } from '../api/simulation'
 import { wsService } from '../api/websocket'
 import { ElMessage } from 'element-plus'
+
+// Konva 画布布局配置（魔法数字提取）
+const MAP_UI = {
+  seaSideHeight: 100,          // 海侧背景区域高度
+  seaSideY: 40,                // 海侧文字垂直偏移
+  seaSideFontSize: 24,         // 海侧文字大小
+
+  // 设备尺寸
+  truckWidth: 24,
+  truckHeight: 12,
+  craneSize: 40,
+  ascSize: 30,
+
+  // 设备绘制偏移（用于显示 ID）
+  idOffsetX: -25,
+  idOffsetY: 25,
+
+  // Z 轴作业进度条
+  zProgressWidth: 40,
+  zProgressHeight: 5,
+  zProgressOffsetY: -30,
+  zTextOffsetY: -45,
+
+  // 路径线条宽度
+  truckRoadWidth: 8,
+  railWidth: 3,
+}
 
 const simStore = useSimStore()
 let animFrameId: number;  // 动画帧句柄
@@ -240,6 +267,18 @@ const filteredEvents = computed(() => {
 });
 
 // 格式化事件 subjects 对象为字符串
+// 格式化仿真时间（毫秒 -> HH:mm:ss.SSS）
+const formatSimTime = (ms: number): string => {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const millis = ms % 1000;
+
+  const pad = (n: number, len = 2) => n.toString().padStart(len, '0');
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(millis, 3)}`;
+};
+
 const formatSubjects = (subjects: any) => {
   if (!subjects) return '';
   return Object.entries(subjects).map(([k, v]) => `${k}:${v}`).join(' | ');
@@ -373,9 +412,18 @@ const handleJsonFileUpload = async (event: Event) => {
         const timeOffset = cmd.timeOffset || 0;
         const targetSimTime = lastSimTime + timeOffset;
 
-        // 如果需要等待到指定仿真时间，先推进仿真时钟
+        // 如果需要快进到指定仿真时间，使用时间分片防止请求超时
         if (timeOffset > 0 && targetSimTime > simStore.simTime) {
-          await tick(targetSimTime - simStore.simTime);
+          let delta = targetSimTime - simStore.simTime;
+          const MAX_STEP = 1000; // 每次最多推进 1000ms
+
+          while (delta > 0) {
+            const step = Math.min(delta, MAX_STEP);
+            await tick(step);
+            delta -= step;
+            // 让出 JS 线程，避免界面假死
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
 
         await executeCommand(cmd);

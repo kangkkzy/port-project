@@ -464,10 +464,12 @@ public class SimulationEngine implements InitializingBean {
                 sameTimeEventCount = 1;   // 重置为新时间戳的第一个事件
             }
 
-            // 如果启用了时间同步，根据播放速度等待真实时间（用于前端动画）
-            if (timeSyncEnabled) {
-                syncToRealTime(nextEvent.getTriggerTime());
-            }
+            // 注意：在 HTTP 驱动模式下（前端调用 tick），这里不再 sleep。
+            // 前端已经通过 tick() 的间隔控制了视觉上的动画速度。
+            // 只有在后端自主运行模式（isRunning == true）时才需要 syncToRealTime。
+            // if (timeSyncEnabled) {
+            //     syncToRealTime(nextEvent.getTriggerTime());
+            // }
 
             // 取出并处理事件
             eventQueue.poll();
