@@ -1,13 +1,13 @@
 {
   "scenarioName": "全外部数据驱动的合规作业场景",
   "initTrucks": [
-    { "id": "TRUCK_01", "type": "ELECTRIC_TRUCK", "posX": 300.0, "posY": 150.0, "speed": 10.0, "powerLevel": 100.0, "state": "IDLE" }
+    { "id": "TRUCK_01", "type": "ELECTRIC_TRUCK", "posX": 250.0, "posY": 150.0, "speed": 10.0, "powerLevel": 100.0, "state": "IDLE" }
   ],
   "initQcs": [
-    { "id": "QC_01", "type": "QC", "posX": 300.0, "posY": 100.0, "speed": 5.0, "state": "IDLE" }
+    { "id": "QC_01", "type": "QC", "posX": 250.0, "posY": 100.0, "speed": 5.0, "state": "IDLE" }
   ],
   "initAscs": [
-    { "id": "ASC_01", "type": "ASC", "posX": 200.0, "posY": 350.0, "speed": 5.0, "state": "IDLE" }
+    { "id": "ASC_01", "type": "ASC", "posX": 200.0, "posY": 450.0, "speed": 5.0, "state": "IDLE" }
   ],
   "initContainers": [
     { "containerId": "CONT_001", "currentPos": "BAY_01" }

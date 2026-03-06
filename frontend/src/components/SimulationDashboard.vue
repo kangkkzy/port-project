@@ -140,7 +140,7 @@
                   }" />
               </template>
 
-              <!-- 动态渲染交接区域（Transfer Zones）：使用 xRange/yRange 定义边界 -->
+              <!-- 动态渲染交接区域（Transfer Zones）：QC_YARD 橙色，YARD_TRUCK 红色 -->
               <template v-if="simStore.transferZones && simStore.transferZones.length > 0">
                 <v-rect v-for="tz in simStore.transferZones" :key="'tz-'+tz.zoneId"
                         :config="{
@@ -148,11 +148,10 @@
                     y: tz.yRange[0],
                     width: tz.xRange[1] - tz.xRange[0],
                     height: tz.yRange[1] - tz.yRange[0],
-                    fill: '#f3e5f5',
-                    stroke: '#ab47bc',
-                    strokeWidth: 1,
-                    dash: [4, 4],
-                    opacity: 0.5,
+                    fill: tz.type === 'QC_YARD' ? 'rgba(255,152,0,0.35)' : 'rgba(244,67,54,0.35)',
+                    stroke: tz.type === 'QC_YARD' ? '#ff9800' : '#f44336',
+                    strokeWidth: 2,
+                    dash: [5, 3],
                     listening: false
                   }" />
                 <v-text v-for="tz in simStore.transferZones" :key="'tz-text-'+tz.zoneId"
@@ -161,8 +160,8 @@
                     y: (tz.yRange[0] + tz.yRange[1]) / 2 - 5,
                     text: tz.name,
                     fontSize: 9,
-                    fill: '#6a1b9a',
-                    opacity: 0.8,
+                    fill: tz.type === 'QC_YARD' ? '#e65100' : '#b71c1c',
+                    opacity: 0.9,
                     listening: false
                   }" />
               </template>
@@ -832,10 +831,11 @@ const handleMoveToTarget = async () => {
 
       ElMessage.success(`指令发送成功: [${deviceId}] ${moveType} ${distance >= 0 ? '+' : ''}${distance}m`);
     } else {
-      // MoveCommandReq: truckId + targetPoint: {x, y}
+      // MoveCommandReq: truckId + targetPoint + speed（speed 必填，否则后端 CmdMoveHandler 抛异常）
       const payload = {
         truckId: deviceId,
-        targetPoint: { x: Number(targetPos.x), y: Number(targetPos.y) }
+        targetPoint: { x: Number(targetPos.x), y: Number(targetPos.y) },
+        speed: 5.0
       };
       console.log('🚀 发送集卡指令 Payload:', payload);
       await moveTruck(payload);
