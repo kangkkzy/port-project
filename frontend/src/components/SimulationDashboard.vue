@@ -178,14 +178,14 @@
 
             <v-layer name="devices">
               <!-- 渲染所有设备，并根据状态显示不同样式 -->
-              <v-group v-for="dev in displayDevices" :key="dev.id"
+              <v-group v-for="(dev, deviceIdKey) in displayDevices" :key="deviceIdKey"
                        :config="{ x: dev.posX, y: dev.posY }"
-                       @click="(e) => { e.cancelBubble = true; simStore.selectDevice(dev.deviceId || dev.id); }"
+                       @click="(e) => handleDeviceSelect(e, deviceIdKey)"
                        @mouseenter="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'pointer'; }"
                        @mouseleave="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'default'; }">
 
                 <!-- 选中状态高亮边框 -->
-                <v-rect v-if="simStore.selectedDeviceId === (dev.deviceId || dev.id)"
+                <v-rect v-if="simStore.selectedDeviceId === String(deviceIdKey)"
                         :config="{
                     x: -22, y: -22,
                     width: MAP_UI.craneSize + 4,
@@ -236,58 +236,6 @@
           </v-stage>
         </div>
 
-        <!-- 控制面板：手动指令调度 -->
-        <div class="control-panel" :class="{ 'has-device': simStore.selectedDeviceId }">
-          <!-- 场景未加载警告 -->
-          <el-alert v-if="Object.keys(displayDevices).length === 0"
-                    title="当前场景未加载任何设备"
-                    type="error"
-                    description="请先上传 Scenario 脚本或通过后端接口初始化场景"
-                    :closable="false"
-                    show-icon>
-          </el-alert>
-
-          <div v-if="simStore.selectedDeviceId" class="panel-content">
-            <div class="panel-header">
-              <span>控制面板 - 手动调度</span>
-              <el-button size="small" text @click="handleClearSelection">关闭</el-button>
-            </div>
-            <div class="info-row">
-              <span class="label">选中设备:</span>
-              <span class="value">{{ simStore.selectedDeviceId }}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">设备类型:</span>
-              <span class="value">{{ simStore.selectedDevice?.type }}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">当前位置:</span>
-              <span class="value">({{ simStore.selectedDevice?.posX }}, {{ simStore.selectedDevice?.posY }})</span>
-            </div>
-            <div class="info-row" v-if="simStore.selectedTargetPos">
-              <span class="label">目标位置:</span>
-              <span class="value highlight">({{ simStore.selectedTargetPos.x }}, {{ simStore.selectedTargetPos.y }})</span>
-            </div>
-            <div class="action-buttons">
-              <el-button
-                  type="primary"
-                  size="small"
-                  :disabled="!simStore.selectedTargetPos"
-                  @click="handleMoveToTarget"
-              >
-                移动到目标点
-              </el-button>
-              <el-button
-                  v-if="simStore.selectedDevice?.type?.includes('TRUCK')"
-                  size="small"
-                  @click="handleCharge"
-              >
-                充电
-              </el-button>
-            </div>
-          </div>
-        </div>
-
         <!-- 终端日志面板：显示仿真内核事件 -->
         <div class="terminal-panel">
           <!-- 日志过滤标签 -->
@@ -316,14 +264,66 @@
         </div>
       </div>
 
-      <!-- 右侧拦截台：显示业务逻辑错误和警告 -->
-      <div class="log-console" style="position: absolute; right: 20px; top: 120px; width: 320px; background: rgba(0,0,0,0.85); color: #fff; padding: 15px; border-radius: 8px; z-index: 999; max-height: 500px; overflow-y: auto;">
-        <h3 style="margin-top: 0; color: #ffeb3b; border-bottom: 1px solid #666; padding-bottom: 8px;">⚠️ 业务逻辑拦截台</h3>
-        <div v-if="simStore.eventLogs.length === 0" style="color: #aaa; font-size: 12px; margin-top: 10px;">暂无拦截记录...</div>
-        <div v-for="(log, index) in simStore.eventLogs" :key="index" style="margin-top: 10px; font-size: 13px; line-height: 1.5; border-bottom: 1px dashed #444; padding-bottom: 8px;">
-          <span style="color: #ff5722; font-family: monospace;">[{{ log.simTime }}ms]</span>
-          <span style="color: #03a9f4; font-weight: bold; margin-left: 5px;">{{ log.deviceId }}</span>
-          <div style="color: #ff8a80; margin-top: 4px;">✖ {{ log.message }}</div>
+      <!-- 右侧控制面板：手动指令调度 + 业务逻辑拦截台 -->
+      <div class="control-panel" :class="{ 'has-device': simStore.selectedDeviceId }">
+        <!-- 场景未加载警告 -->
+        <el-alert v-if="Object.keys(displayDevices).length === 0"
+                  title="当前场景未加载任何设备"
+                  type="error"
+                  description="请先上传 Scenario 脚本或通过后端接口初始化场景"
+                  :closable="false"
+                  show-icon>
+        </el-alert>
+
+        <div v-if="simStore.selectedDeviceId" class="panel-content">
+          <div class="panel-header">
+            <span>控制面板 - 手动调度</span>
+            <el-button size="small" text @click="handleClearSelection">关闭</el-button>
+          </div>
+          <div class="info-row">
+            <span class="label">选中设备:</span>
+            <span class="value">{{ simStore.selectedDeviceId }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">设备类型:</span>
+            <span class="value">{{ simStore.selectedDevice?.type }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">当前位置:</span>
+            <span class="value">({{ simStore.selectedDevice?.posX }}, {{ simStore.selectedDevice?.posY }})</span>
+          </div>
+          <div class="info-row" v-if="simStore.selectedTargetPos">
+            <span class="label">目标位置:</span>
+            <span class="value highlight">({{ simStore.selectedTargetPos.x }}, {{ simStore.selectedTargetPos.y }})</span>
+          </div>
+          <div class="action-buttons">
+            <el-button
+                type="primary"
+                size="small"
+                :disabled="!simStore.selectedTargetPos"
+                @click="handleMoveToTarget"
+            >
+              移动到目标点
+            </el-button>
+            <el-button
+                v-if="simStore.selectedDevice?.type?.includes('TRUCK')"
+                size="small"
+                @click="handleCharge"
+            >
+              充电
+            </el-button>
+          </div>
+        </div>
+
+        <!-- 业务逻辑拦截台 -->
+        <div class="intercept-panel">
+          <h3 class="intercept-title">业务逻辑拦截台</h3>
+          <div v-if="simStore.eventLogs.length === 0" class="intercept-empty">暂无拦截记录...</div>
+          <div v-for="(log, index) in simStore.eventLogs" :key="index" class="intercept-item">
+            <span class="intercept-time">[{{ log.simTime }}ms]</span>
+            <span class="intercept-device">{{ log.deviceId }}</span>
+            <div class="intercept-msg">{{ log.message }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -856,26 +856,11 @@ const handleReset = async () => {
 </script>
 
 <style scoped>
-/* 应用容器 Flex 布局 */
+/* ===================== 整体框架：纵向 Flex ===================== */
 .dashboard {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
-}
-
-/* 主内容区域 */
-.main-content {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-/* 左侧区域 */
-.left-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
 }
 
@@ -887,10 +872,11 @@ const handleReset = async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .toolbar h2 {
-  margin: 0 0 10px 0;
+  margin: 0;
   font-size: 18px;
   color: #333;
 }
@@ -907,47 +893,177 @@ const handleReset = async () => {
   font-size: 14px;
 }
 
-/* 画布容器 */
-.canvas-container {
+/* ===================== 主内容区：横向 Flex ===================== */
+.main-content {
+  display: flex;
+  flex-direction: row;
   flex: 1;
-  background: #f5f5f5;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* 控制面板样式 - 固定在右侧 */
-.control-panel {
-  width: 350px;
-  background: #fff;
-  border-left: 1px solid #ddd;
-  overflow-y: auto;
-  padding: 20px;
+/* 左侧区域：画布 + 日志，纵向排列 */
+.left-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
-/* 没有选中设备时隐藏内容 */
-.control-panel .panel-content {
-  display: none;
+/* 画布容器：填满左侧剩余空间 */
+.canvas-container {
+  flex: 1;
+  background: #e6e9f0;
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* 选中设备时显示内容 */
-.control-panel.has-device .panel-content {
-  display: block;
-}
-
-/* 终端日志面板样式 - 固定在左下角 */
+/* 终端日志面板：固定高度，位于画布下方 */
 .terminal-panel {
   height: 200px;
+  flex-shrink: 0;
   background: #1e1e1e;
   overflow-y: auto;
   border-top: 1px solid #333;
 }
 
-/* 全局熔断遮罩样式 */
+/* ===================== 右侧控制面板：固定宽度 ===================== */
+.control-panel {
+  width: 360px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 2px solid #dcdfe6;
+  padding: 16px;
+  overflow-y: auto;
+  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.control-panel .panel-content {
+  display: none;
+}
+
+.control-panel.has-device .panel-content {
+  display: block;
+}
+
+/* ===================== 控制面板内部 ===================== */
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #409eff;
+  color: #fff;
+  border-radius: 8px 8px 0 0;
+  font-weight: bold;
+}
+
+.panel-content {
+  padding: 12px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.info-row .label { color: #666; }
+.info-row .value { color: #333; font-weight: 500; }
+.info-row .value.highlight { color: #f44336; }
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ===================== 业务逻辑拦截台 ===================== */
+.intercept-panel {
+  background: #1a1a2e;
+  border-radius: 8px;
+  padding: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.intercept-title {
+  margin: 0 0 10px 0;
+  color: #ffeb3b;
+  font-size: 13px;
+  font-weight: bold;
+  border-bottom: 1px solid #444;
+  padding-bottom: 8px;
+}
+
+.intercept-empty {
+  color: #888;
+  font-size: 12px;
+}
+
+.intercept-item {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px dashed #444;
+  padding-bottom: 8px;
+}
+
+.intercept-time {
+  color: #ff5722;
+  font-family: monospace;
+}
+
+.intercept-device {
+  color: #03a9f4;
+  font-weight: bold;
+  margin-left: 6px;
+}
+
+.intercept-msg {
+  color: #ff8a80;
+  margin-top: 2px;
+}
+
+/* ===================== 日志过滤标签 ===================== */
+.log-filters {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #444;
+  flex-shrink: 0;
+}
+
+.filter-tag {
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #888;
+  transition: all 0.2s;
+}
+
+.filter-tag:hover { color: #fff; }
+.filter-tag.active { background: #409eff; color: #fff; }
+
+/* ===================== 速度控制 ===================== */
+.speed-control {
+  background: #f0f0f0;
+  padding: 6px 14px;
+  border-radius: 4px;
+}
+
+/* ===================== 全局熔断遮罩 ===================== */
 .suspend-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background: rgba(180, 20, 20, 0.85);
   display: flex;
   align-items: center;
@@ -985,121 +1101,6 @@ const handleReset = async () => {
   color: #333;
 }
 
-.suspend-detail div {
-  margin-bottom: 8px;
-}
-
-.suspend-detail div:last-child {
-  margin-bottom: 0;
-}
-
-/* 速度控制样式 */
-.speed-control {
-  background: #f0f0f0;
-  padding: 8px 16px;
-  border-radius: 4px;
-}
-
-/* 控制面板样式 */
-.control-panel {
-  width: 350px;
-  background: #fff;
-  border-left: 1px solid #ddd;
-  overflow-y: auto;
-  padding: 20px;
-}
-
-/* 没有选中设备时隐藏内容 */
-.control-panel .panel-content {
-  display: none;
-}
-
-/* 选中设备时显示内容 */
-.control-panel.has-device .panel-content {
-  display: block;
-}
-
-/* 地图容器 */
-.map-container {
-  position: relative;
-  background: #f5f5f5;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-/* 终端日志面板样式 */
-.terminal-panel {
-  height: 200px;
-  background: #1e1e1e;
-  overflow-y: auto;
-  border-top: 1px solid #333;
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: #409eff;
-  color: #fff;
-  border-radius: 8px 8px 0 0;
-  font-weight: bold;
-}
-
-.panel-content {
-  padding: 16px;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.info-row .label {
-  color: #666;
-}
-
-.info-row .value {
-  color: #333;
-  font-weight: 500;
-}
-
-.info-row .value.highlight {
-  color: #f44336;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-/* 日志过滤样式 */
-.log-filters {
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #2d2d2d;
-  border-bottom: 1px solid #444;
-}
-
-.filter-tag {
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #888;
-  transition: all 0.2s;
-}
-
-.filter-tag:hover {
-  color: #fff;
-}
-
-.filter-tag.active {
-  background: #409eff;
-  color: #fff;
-}
+.suspend-detail div { margin-bottom: 8px; }
+.suspend-detail div:last-child { margin-bottom: 0; }
 </style>
