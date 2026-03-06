@@ -49,8 +49,10 @@ public class SimulationEventWebSocketService {
         // 检查事件类型是否在广播列表中
         if (!BROADCAST_EVENTS.contains(event.getType())) return;
 
-        // 从事件中获取主体设备ID
+        // MOVE_START/ARRIVAL 事件主体 key 是 "TRUCK" 或 "CRANE"，不是 "DEVICE"，需逐级回退
         String deviceId = event.getPrimarySubject("DEVICE");
+        if (deviceId == null) deviceId = event.getPrimarySubject("TRUCK");
+        if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
         if (deviceId == null) return;
 
         Map<String, Object> payload = new HashMap<>();
@@ -66,13 +68,20 @@ public class SimulationEventWebSocketService {
             payload.put("currentPosX", device.getPosX());
             payload.put("currentPosY", device.getPosY());
 
-            // 如果是卡车，并且还有剩余路径点，则将第一个目标点也推给前端（用于动画指示）
+            // 推送终点坐标（前端 lerp 动画的目标）：优先用集卡的剩余路径首点，其次用 currentTargetPos
+            model.entity.Point targetPos = null;
             if (device instanceof Truck) {
                 Truck truck = (Truck) device;
                 if (truck.getRemainingMoveTargets() != null && !truck.getRemainingMoveTargets().isEmpty()) {
-                    payload.put("targetPosX", truck.getRemainingMoveTargets().get(0).getX());
-                    payload.put("targetPosY", truck.getRemainingMoveTargets().get(0).getY());
+                    targetPos = truck.getRemainingMoveTargets().get(0);
                 }
+            }
+            if (targetPos == null) {
+                targetPos = device.getCurrentTargetPos(); // 覆盖 QC/ASC 等起重机
+            }
+            if (targetPos != null) {
+                payload.put("targetPosX", targetPos.getX());
+                payload.put("targetPosY", targetPos.getY());
             }
         }
 

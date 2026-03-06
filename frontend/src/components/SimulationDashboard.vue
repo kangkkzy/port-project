@@ -141,13 +141,14 @@
               </template>
 
               <!-- 动态渲染交接区域（Transfer Zones）：QC_YARD 橙色，YARD_TRUCK 红色 -->
+              <!-- 使用 posX/posY/width/length Bounding Box 格式（与 TransferZoneDto 字段对应） -->
               <template v-if="simStore.transferZones && simStore.transferZones.length > 0">
                 <v-rect v-for="tz in simStore.transferZones" :key="'tz-'+tz.zoneId"
                         :config="{
-                    x: tz.xRange[0],
-                    y: tz.yRange[0],
-                    width: tz.xRange[1] - tz.xRange[0],
-                    height: tz.yRange[1] - tz.yRange[0],
+                    x: tz.posX,
+                    y: tz.posY,
+                    width: tz.width,
+                    height: tz.length,
                     fill: tz.type === 'QC_YARD' ? 'rgba(255,152,0,0.35)' : 'rgba(244,67,54,0.35)',
                     stroke: tz.type === 'QC_YARD' ? '#ff9800' : '#f44336',
                     strokeWidth: 2,
@@ -156,8 +157,8 @@
                   }" />
                 <v-text v-for="tz in simStore.transferZones" :key="'tz-text-'+tz.zoneId"
                         :config="{
-                    x: tz.xRange[0] + 3,
-                    y: (tz.yRange[0] + tz.yRange[1]) / 2 - 5,
+                    x: tz.posX + 3,
+                    y: tz.posY + tz.length / 2 - 5,
                     text: tz.name,
                     fontSize: 9,
                     fill: tz.type === 'QC_YARD' ? '#e65100' : '#b71c1c',
@@ -339,16 +340,22 @@
             </el-button>
           </div>
 
-          <!-- 交接区快捷面板：仅当选中设备进入某个交接区时显示 -->
+          <!-- 交接区快捷面板：仅当选中【起重机】进入某个交接区时显示 -->
           <div v-if="activeTransferZone" class="transfer-zone-panel">
             <div class="tz-header">
               <span class="tz-icon">📍</span>
               <span>身处交接区：<strong>{{ activeTransferZone.name || activeTransferZone.zoneId }}</strong></span>
             </div>
             <div class="tz-type">类型：{{ activeTransferZone.type }}</div>
+            <el-input
+                v-model="targetTruckIdForOp"
+                placeholder="输入目标集卡 ID (如: TRUCK_01)"
+                size="small"
+                style="margin: 8px 0"
+            />
             <div class="tz-actions">
-              <el-button type="primary" size="small" @click="handleTask('FETCH')">抓取作业 (Fetch)</el-button>
-              <el-button type="warning" size="small" @click="handleTask('PUT')">放置作业 (Put)</el-button>
+              <el-button type="primary" size="small" @click="handleCraneOp('FETCH')">抓取箱子 (Fetch)</el-button>
+              <el-button type="warning" size="small" @click="handleCraneOp('PUT')">放置箱子 (Put)</el-button>
             </div>
           </div>
         </div>
@@ -423,6 +430,8 @@ const lastFrameTime = ref(0)
 const logFilter = ref<'all' | 'movement' | 'crane'>('all')
 // 指令速度：前端作为"人肉算法层"必须显式下发 speed，后端不设保底值
 const commandSpeed = ref(5.0)
+// 交接区协同作业时指定的目标集卡ID
+const targetTruckIdForOp = ref('')
 // 用于区分拖拽和点击
 const isDragging = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
@@ -454,17 +463,19 @@ const flattenPathNodes = (nodes: { x: number, y: number }[]): number[] => {
 }
 
 /**
- * 当前选中设备是否身处某个交接区（AABB 碰撞检测）。
- * 后端 TransferZoneDto 使用 xRange[min,max] / yRange[min,max] 数组结构。
- * 返回匹配的交接区对象，或 null（无选中设备 / 不在任何区域内）。
+ * 当前选中设备是否身处某个交接区（AABB Bounding Box 碰撞检测）。
+ * 只有选中起重机（QC/ASC）时才激活，集卡不能触发抓/放作业 API。
+ * 使用 posX/posY/width/length 格式（与 TransferZoneDto 字段对应）。
  */
 const activeTransferZone = computed(() => {
   const dev = simStore.selectedDevice
   if (!dev || !simStore.transferZones) return null
+  // 严格限制：只有起重机才能触发交接区面板
+  if (dev.type !== 'QC' && dev.type !== 'ASC') return null
   return simStore.transferZones.find((tz: any) => {
-    if (!tz.xRange || !tz.yRange) return false
-    return dev.posX >= tz.xRange[0] && dev.posX <= tz.xRange[1] &&
-        dev.posY >= tz.yRange[0] && dev.posY <= tz.yRange[1]
+    if (tz.posX == null || tz.posY == null || tz.width == null || tz.length == null) return false
+    return dev.posX >= tz.posX && dev.posX <= tz.posX + tz.width &&
+        dev.posY >= tz.posY && dev.posY <= tz.posY + tz.length
   }) ?? null
 })
 
@@ -927,27 +938,36 @@ const handleCharge = async () => {
 
 /**
  * 交接区快捷作业指令（FETCH = 抓取，PUT = 放置）。
- * 触发 /sim/command/crane/operate，参数由当前选中设备 + 交接区确定。
+ * 只允许起重机（QC/ASC）触发，并强制携带目标集卡 ID 以供后端校验协同距离。
  */
-const handleTask = async (opType: 'FETCH' | 'PUT') => {
+const handleCraneOp = async (opType: 'FETCH' | 'PUT') => {
   const deviceId = simStore.selectedDeviceId
   if (!deviceId) {
     ElMessage.warning('请先在地图上选中起重机设备')
     return
   }
+  const dev = simStore.selectedDevice
+  if (!dev || (dev.type !== 'QC' && dev.type !== 'ASC')) {
+    ElMessage.error('集卡不能执行抓/放箱作业，请选中起重机(QC/ASC)')
+    return
+  }
   const tz = activeTransferZone.value
   if (!tz) {
-    ElMessage.warning('设备未处于交接区，无法触发作业')
+    ElMessage.warning('起重机未处于交接区，无法触发作业')
+    return
+  }
+  if (!targetTruckIdForOp.value.trim()) {
+    ElMessage.warning('请先输入目标集卡 ID')
     return
   }
   try {
     await operateCrane({
       craneId: deviceId,
-      operation: opType,
-      durationMS: 3000,
-      zoneId: tz.zoneId
+      targetTruckId: targetTruckIdForOp.value.trim(),
+      action: opType === 'FETCH' ? 'FETCH_DONE' : 'PUT_DONE',
+      durationMS: 3000
     })
-    ElMessage.success(`[${deviceId}] ${opType === 'FETCH' ? '抓取' : '放置'}作业指令已发送 (交接区: ${tz.name || tz.zoneId})`)
+    ElMessage.success(`[${deviceId}] ${opType === 'FETCH' ? '抓取' : '放置'}指令发送成功 (目标: ${targetTruckIdForOp.value.trim()})`)
   } catch (e: any) {
     ElMessage.error(`作业指令失败: ${e.response?.data?.message || e.message}`)
   }

@@ -355,8 +355,8 @@ public class MapDataServiceImpl implements MapDataService {
                 if (zoneType.startsWith("ASC") && !zone.getZoneId().startsWith("ASC_TRANSFER")) continue;
             }
 
-            Double[] xRange = zone.getxRange();
-            Double[] yRange = zone.getyRange();
+            Double[] xRange = zone.getXRange();
+            Double[] yRange = zone.getYRange();
             if (xRange != null && yRange != null) {
                 if (x >= xRange[0] && x <= xRange[1] && y >= yRange[0] && y <= yRange[1]) {
                     return true;
@@ -371,7 +371,7 @@ public class MapDataServiceImpl implements MapDataService {
         for (TransferZoneDto zone : transferZoneList) {
             if (!zone.getZoneId().startsWith("QC_TRANSFER")) continue;
 
-            Double[] xRange = zone.getxRange();
+            Double[] xRange = zone.getXRange();
             if (xRange != null && qcX >= xRange[0] && qcX <= xRange[1]) {
                 return zone;
             }
@@ -384,7 +384,7 @@ public class MapDataServiceImpl implements MapDataService {
         for (TransferZoneDto zone : transferZoneList) {
             if (!zone.getZoneId().startsWith("ASC_TRANSFER")) continue;
 
-            Double[] xRange = zone.getxRange();
+            Double[] xRange = zone.getXRange();
             if (xRange != null && ascX >= xRange[0] && ascX <= xRange[1]) {
                 return zone;
             }
@@ -408,8 +408,8 @@ public class MapDataServiceImpl implements MapDataService {
             if ("QC".equals(zoneType) && !isQcZone) continue;
             if ("ASC".equals(zoneType) && !isAscZone) continue;
 
-            Double[] xRange = zone.getxRange();
-            Double[] yRange = zone.getyRange();
+            Double[] xRange = zone.getXRange();
+            Double[] yRange = zone.getYRange();
             if (xRange == null || yRange == null) continue;
 
             double xMin = xRange[0] - tolerance;

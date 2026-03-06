@@ -154,6 +154,16 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             }
         }
 
+        // ── 通用路网校验（第三道防线）：终点必须在对应类型的有效轨道上 ──
+        double targetX = targetPoint.getX();
+        double targetY = targetPoint.getY();
+        boolean isOnPath = mapDataService.isPositionOnPath(device.getType().name(), targetX, targetY);
+        if (!isOnPath) {
+            log.error("脱轨异常: 起重机 [{}] 目标坐标 ({}, {}) 不在有效轨道路网上", craneId, targetX, targetY);
+            throw new BusinessException(String.format(
+                    "脱轨异常: 起重机 [%s] 目标坐标 (%.1f, %.1f) 不在港口有效路网上！", craneId, targetX, targetY));
+        }
+
         device.setSpeed(speed);
         device.setCurrentTargetPos(targetPoint);
 

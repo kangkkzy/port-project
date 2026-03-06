@@ -281,21 +281,28 @@ export const useSimStore = defineStore('simulation', {
                 this.events = this.events.slice(-500);
             }
 
-            // 如果包含位置信息，平滑更新设备位置
-            if (eventData.deviceId && eventData.currentPosX !== undefined && eventData.currentPosY !== undefined) {
+            // 如果包含位置信息，更新 device.posX/posY 使 animateLoop 感知到坐标差，触发 lerp 动画
+            if (eventData.deviceId && eventData.currentPosX !== undefined) {
                 const device = this.devices.find(d => d.id === eventData.deviceId);
                 if (device) {
-                    // 平滑更新目标位置，由视图层处理补间动画
-                    device.targetPosX = eventData.currentPosX;
-                    device.targetPosY = eventData.currentPosY;
-                    // 如果有目标位置信息也一并更新
+                    // 优先使用终点坐标(targetPosX)作为视觉目标，让 lerp 从当前显示位置平滑过渡到终点
+                    // MOVE_START 事件携带 targetPosX = 第一个路径节点（即单段移动的终点）
+                    // ARRIVAL 事件携带 currentPosX = 实际到达坐标，两者都能正确驱动动画
                     if (eventData.targetPosX !== undefined) {
-                        device.nextTargetX = eventData.targetPosX;
-                        device.nextTargetY = eventData.targetPosY;
+                        device.posX = eventData.targetPosX;
+                        device.posY = eventData.targetPosY;
+                    } else {
+                        device.posX = eventData.currentPosX;
+                        device.posY = eventData.currentPosY;
                     }
                     // 如果是当前选中的设备收到位置更新，清除待执行指令（表示已起步）
                     if (this.selectedDeviceId === eventData.deviceId && this.pendingMoveCommand) {
                         this.pendingMoveCommand = null;
+                    }
+                    // 同步选中设备的坐标显示
+                    if (this.selectedDeviceId === eventData.deviceId && this.selectedDevice) {
+                        this.selectedDevice.posX = device.posX;
+                        this.selectedDevice.posY = device.posY;
                     }
                 }
             }

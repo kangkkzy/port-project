@@ -86,29 +86,25 @@
       "zoneId": "TZ_QC_A",
       "name": "QC-Truck Transfer A",
       "type": "QC_YARD",
-      "xRange": [230.0, 270.0],
-      "yRange": [135.0, 165.0]
+      "posX": 230.0, "posY": 90.0, "width": 40.0, "length": 70.0
     },
     {
       "zoneId": "TZ_QC_B",
       "name": "QC-Truck Transfer B",
       "type": "QC_YARD",
-      "xRange": [430.0, 470.0],
-      "yRange": [135.0, 165.0]
+      "posX": 430.0, "posY": 90.0, "width": 40.0, "length": 70.0
     },
     {
       "zoneId": "TZ_ASC_A",
       "name": "ASC-Truck Transfer A",
       "type": "YARD_TRUCK",
-      "xRange": [183.0, 220.0],
-      "yRange": [443.0, 460.0]
+      "posX": 190.0, "posY": 440.0, "width": 70.0, "length": 20.0
     },
     {
       "zoneId": "TZ_ASC_B",
       "name": "ASC-Truck Transfer B",
       "type": "YARD_TRUCK",
-      "xRange": [383.0, 420.0],
-      "yRange": [443.0, 460.0]
+      "posX": 390.0, "posY": 440.0, "width": 70.0, "length": 20.0
     }
   ]
 }
