@@ -81,7 +81,7 @@
     <div class="main-content">
       <div class="left-section">
         <!-- 画布区域：使用 Konva 渲染地图和设备 -->
-        <div class="map-container" ref="mapContainerRef">
+        <div class="canvas-container" ref="mapContainerRef">
           <v-stage :config="stageConfig"
                    @click="handleStageClick"
                    @dragstart="handleStageDragStart"
@@ -843,6 +843,98 @@ const handleReset = async () => {
 </script>
 
 <style scoped>
+/* 应用容器 Flex 布局 */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 主内容区域 */
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 左侧区域 */
+.left-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 工具栏 */
+.toolbar {
+  background: #f5f5f5;
+  padding: 10px 20px;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar h2 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.toolbar .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar .time-display {
+  color: #333;
+  font-size: 14px;
+}
+
+/* 画布容器 */
+.canvas-container {
+  flex: 1;
+  background: #f5f5f5;
+  overflow: hidden;
+}
+
+/* 地图容器（保留用于 Konva） */
+.map-container {
+  width: 100%;
+  height: 100%;
+  background: #f5f5f5;
+}
+
+/* 控制面板样式 - 固定在右侧 */
+.control-panel {
+  width: 350px;
+  background: #fff;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* 没有选中设备时隐藏内容 */
+.control-panel .panel-content {
+  display: none;
+}
+
+/* 选中设备时显示内容 */
+.control-panel.has-device .panel-content {
+  display: block;
+}
+
+/* 终端日志面板样式 - 固定在左下角 */
+.terminal-panel {
+  height: 200px;
+  background: #1e1e1e;
+  overflow-y: auto;
+  border-top: 1px solid #333;
+}
+
 /* 全局熔断遮罩样式 */
 .suspend-overlay {
   position: fixed;

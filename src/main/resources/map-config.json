@@ -17,6 +17,15 @@
     "ascRailTolerance": 3.0,
     "transferZoneTolerance": 5.0
   },
+  "yardBlocks": [
+    { "blockCode": "YARD_A", "posX": 175.0, "posY": 200.0, "width": 50.0, "length": 150.0 },
+    { "blockCode": "YARD_B", "posX": 425.0, "posY": 200.0, "width": 50.0, "length": 150.0 }
+  ],
+  "chargingStations": [
+    { "stationCode": "CHARGE_01", "posX": 50.0, "posY": 300.0 },
+    { "stationCode": "CHARGE_02", "posX": 80.0, "posY": 300.0 },
+    { "stationCode": "CHARGE_03", "posX": 110.0, "posY": 300.0 }
+  ],
   "paths": [
     {
       "pathType": "QC_RAIL",
