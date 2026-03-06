@@ -130,28 +130,40 @@
                     stroke: '#fbc02d',
                     strokeWidth: 2
                   }" />
-                <v-text :config="{
-                  x: station.posX - 15,
-                  y: station.posY + 12,
-                  text: station.stationCode,
-                  fontSize: 8,
-                  fill: '#f57f17'
-                }" v-for="station in simStore.mapConfig.chargingStations" :key="'charge-text-'+station.stationCode" />
-              </template>
-            </v-layer>
-
-            <!-- 动态渲染地图路径（来自 mapConfig.paths） -->
-            <v-layer name="map-paths">
-              <template v-if="simStore.mapConfig?.paths">
-                <v-line v-for="(path, idx) in simStore.mapConfig.paths" :key="'mpath-'+idx"
+                <v-text v-for="station in simStore.mapConfig.chargingStations" :key="'charge-text-'+station.stationCode"
                         :config="{
-                    points: flattenPathNodes(path.nodes),
-                    stroke: path.pathType === 'TRUCK_ROAD' ? '#9e9e9e' : '#78909c',
-                    strokeWidth: path.pathType === 'TRUCK_ROAD' ? 3 : 2,
-                    dash: path.pathType === 'TRUCK_ROAD' ? [] : [8, 4],
+                    x: station.posX - 15,
+                    y: station.posY + 12,
+                    text: station.stationCode,
+                    fontSize: 8,
+                    fill: '#f57f17'
+                  }" />
+              </template>
+
+              <!-- 动态渲染交接区域（Transfer Zones）：使用 xRange/yRange 定义边界 -->
+              <template v-if="simStore.transferZones && simStore.transferZones.length > 0">
+                <v-rect v-for="tz in simStore.transferZones" :key="'tz-'+tz.zoneId"
+                        :config="{
+                    x: tz.xRange[0],
+                    y: tz.yRange[0],
+                    width: tz.xRange[1] - tz.xRange[0],
+                    height: tz.yRange[1] - tz.yRange[0],
+                    fill: '#f3e5f5',
+                    stroke: '#ab47bc',
+                    strokeWidth: 1,
+                    dash: [4, 4],
+                    opacity: 0.5,
+                    listening: false
+                  }" />
+                <v-text v-for="tz in simStore.transferZones" :key="'tz-text-'+tz.zoneId"
+                        :config="{
+                    x: tz.xRange[0] + 3,
+                    y: (tz.yRange[0] + tz.yRange[1]) / 2 - 5,
+                    text: tz.name,
+                    fontSize: 9,
+                    fill: '#6a1b9a',
                     opacity: 0.8,
-                    lineCap: 'round',
-                    lineJoin: 'round'
+                    listening: false
                   }" />
               </template>
             </v-layer>
@@ -469,30 +481,29 @@ const animateLoop = (timestamp?: number) => {
   const lerpFactor = Math.min(deltaTime / 16.67, 2.0); // 限制最大插值防止跳跃
 
   simStore.devices.forEach(target => {
-    if (!displayDevices.value[target.id]) {
-      // 首次出现，直接拷贝
-      displayDevices.value[target.id] = { ...target, zProgress: 0 };
+    // 【核心修复】：后端 DTO 字段名为 deviceId，兼容 id 作为降级
+    const actualId = target.deviceId || target.id;
+    if (!actualId) return;
+
+    if (!displayDevices.value[actualId]) {
+      // 首次出现，直接拷贝，注入统一的 id 字段供模板显示
+      displayDevices.value[actualId] = { ...target, id: actualId, zProgress: 0 };
     } else {
-      const curr = displayDevices.value[target.id];
+      const curr = displayDevices.value[actualId];
       const dx = target.posX - curr.posX;
       const dy = target.posY - curr.posY;
-      // 距离足够近则直接对齐，否则按 Delta Time 比例移动
       if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
         curr.posX = target.posX;
         curr.posY = target.posY;
       } else {
-        // 使用基于时间的平滑因子
         curr.posX += dx * lerpFactor * 0.15;
         curr.posY += dy * lerpFactor * 0.15;
       }
       curr.state = target.state;
       curr.type = target.type;
 
-      // 告警闪烁：如果设备在告警集合中且未超时，则根据时间奇偶控制显示
-      const alertExpiry = simStore.deviceAlerts.get(target.id);
+      const alertExpiry = simStore.deviceAlerts.get(actualId);
       curr.isAlerting = alertExpiry && now < alertExpiry && (Math.floor(now / 250) % 2 === 0);
-
-      // 记录当前 simTime 用于 Z 轴进度计算
       curr.simTime = simStore.simTime;
     }
   });
