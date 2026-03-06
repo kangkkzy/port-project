@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
 
@@ -74,19 +75,24 @@ public class SimulationEngine implements InitializingBean {
     // -------------------- 状态控制标志 --------------------
 
     /**
-     * 全局暂停标志。
-     * 当引擎处理事件抛出异常时置为 true，阻止后续所有事件执行，直到人工 reset。
+     * 引擎生命周期状态（单一权威来源）。
+     * 取代原有 isRunning / isPaused / globalSuspended 三个分散的布尔值，
+     * 对外暴露为统一的 EngineState 枚举。
+     */
+    private volatile EngineState engineState = EngineState.IDLE;
+
+    /**
+     * 全局暂停标志（兼容旧逻辑，由 engineState 同步维护）。
      */
     private volatile boolean globalSuspended = false;
 
     /**
-     * 引擎是否正在自动运行（连续播放）。
+     * 引擎是否正在自动运行（由 engineState 同步维护）。
      */
     private volatile boolean isRunning = false;
 
     /**
-     * 引擎是否处于暂停状态（用于单步调试）。
-     * 当 isRunning == false 且 isPaused == true 时，允许执行单步。
+     * 引擎是否处于暂停状态（由 engineState 同步维护）。
      */
     private volatile boolean isPaused = true;
 
@@ -238,6 +244,8 @@ public class SimulationEngine implements InitializingBean {
      */
     private void triggerGlobalSuspend(SimEvent sourceEvent) {
         this.globalSuspended = true;
+        this.engineState = EngineState.SUSPENDED;
+        this.isRunning = false;
 
         if (sourceEvent != null) {
             log.error(">>> 仿真引擎触发全局暂停 <<< 错误源头: Id={}, Type={}", sourceEvent.getEventId(), sourceEvent.getType());
@@ -325,8 +333,79 @@ public class SimulationEngine implements InitializingBean {
         return globalSuspended;
     }
 
+    public EngineState getState() {
+        return engineState;
+    }
+
     public long getSimTime() {
         return context.getSimTime();
+    }
+
+    // -------------------- 后台自动运行 --------------------
+
+    /**
+     * 启动后台异步事件循环。
+     * 调用后引擎进入 RUNNING 状态，由后台线程持续处理事件队列。
+     * 若已处于 RUNNING 或 SUSPENDED（熔断），则拒绝启动。
+     */
+    public synchronized void start() {
+        if (engineState == EngineState.RUNNING) return;
+        if (engineState == EngineState.SUSPENDED) {
+            log.warn("引擎处于熔断状态(SUSPENDED)，拒绝启动，请先调用 reset() 恢复。");
+            return;
+        }
+        engineState = EngineState.RUNNING;
+        isRunning = true;
+        isPaused = false;
+        log.info("仿真引擎启动后台事件循环...");
+        CompletableFuture.runAsync(this::runLoop);
+    }
+
+    /**
+     * 后台事件循环（由 start() 通过 CompletableFuture 异步调用，禁止手动调用）。
+     *
+     * 设计原则：
+     * - 每轮取出并处理一个事件（通过 processNextEventInternal）
+     * - 队列为空时短暂 sleep，避免空转 CPU
+     * - BusinessException 会在 processEvent 内触发熔断，外层只捕获未预期异常
+     */
+    private void runLoop() {
+        log.info("引擎后台循环已启动 (threadId={})", Thread.currentThread().getId());
+        while (engineState == EngineState.RUNNING) {
+            try {
+                if (eventQueue.isEmpty()) {
+                    Thread.sleep(100);
+                    continue;
+                }
+                synchronized (this) {
+                    processNextEventInternal();
+                }
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("引擎后台循环被中断，退出。");
+                break;
+            } catch (Exception e) {
+                log.error("引擎后台循环发生未预期异常，触发熔断: ", e);
+                engineState = EngineState.SUSPENDED;
+                globalSuspended = true;
+                isRunning = false;
+            }
+        }
+        log.info("引擎后台循环已退出，当前状态: {}", engineState);
+    }
+
+    /**
+     * 内部事件处理器：从队列取出下一个事件并处理。
+     * 与 step() 的区别：不检查 isRunning 标志，专供后台循环调用。
+     */
+    private SimEvent processNextEventInternal() {
+        if (eventQueue.isEmpty()) return null;
+        SimEvent nextEvent = eventQueue.poll();
+        if (nextEvent == null) return null;
+        log.debug("后台循环处理事件: {} at simTime={}", nextEvent.getType(), nextEvent.getTriggerTime());
+        processEvent(nextEvent);
+        return nextEvent;
     }
 
     // -------------------- 引擎重置 --------------------
@@ -343,7 +422,7 @@ public class SimulationEngine implements InitializingBean {
         globalSuspended = false;
         isRunning = false;
         isPaused = true;
-        // 清空全局上下文中的所有实体和仿真时间
+        engineState = EngineState.IDLE;
         GlobalContext.getInstance().clearAll();
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
@@ -390,6 +469,7 @@ public class SimulationEngine implements InitializingBean {
     public void resume() {
         this.isPaused = false;
         this.isRunning = true;
+        this.engineState = EngineState.RUNNING;
         log.info("仿真引擎已恢复运行");
     }
 
@@ -399,6 +479,7 @@ public class SimulationEngine implements InitializingBean {
     public void pause() {
         this.isRunning = false;
         this.isPaused = true;
+        this.engineState = EngineState.PAUSED;
         log.info("仿真引擎已暂停");
     }
 

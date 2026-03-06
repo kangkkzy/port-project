@@ -42,7 +42,10 @@ public class CmdCraneMoveHandler implements SimEventHandler {
     public void handle(SimEvent event, SimulationEngine engine, GlobalContext context) {
         String craneId = event.getPrimarySubject("CRANE");
         BaseDevice device = context.getDevice(craneId);
-        if (device == null) return;
+        if (device == null) {
+            throw new BusinessException(String.format(
+                    "吊具移动指令错误：设备 [%s] 不存在，外部算法下发了无效的设备ID", craneId));
+        }
 
         if (device.getState() == DeviceStateEnum.WORKING) {
             throw new BusinessException(String.format("设备 %s 正在作业中，无法执行移动", craneId));

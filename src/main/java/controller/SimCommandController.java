@@ -1,6 +1,7 @@
 package controller;
 
 import common.Result;
+import engine.EngineState;
 import engine.SimulationEngine;
 import model.dto.request.*;
 import model.dto.snapshot.*;
@@ -35,7 +36,12 @@ public class SimCommandController {
         if (engine.isGlobalSuspended()) {
             return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
         }
-        return algorithmApi.moveDevice(req);
+        Result result = algorithmApi.moveDevice(req);
+        // 指令入队后，若引擎未在运行，立即唤醒后台循环
+        if (engine.getState() != EngineState.RUNNING) {
+            engine.start();
+        }
+        return result;
     }
 
     @PostMapping("/crane/move")
@@ -43,7 +49,11 @@ public class SimCommandController {
         if (engine.isGlobalSuspended()) {
             return Result.error("引擎已处于全局熔断状态，拒绝接收新指令。请先重置引擎！");
         }
-        return algorithmApi.moveCrane(req);
+        Result result = algorithmApi.moveCrane(req);
+        if (engine.getState() != EngineState.RUNNING) {
+            engine.start();
+        }
+        return result;
     }
 
     //   业务与环境控制 处理任务分配 设备具体操作及环境设施变更
