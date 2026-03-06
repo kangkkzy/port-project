@@ -78,19 +78,20 @@
       </div>
     </div>
 
-    <div class="main-content">
-      <div class="left-section">
+    <div class="dashboard-layout">
+      <div class="main-view">
         <!-- 画布区域：使用 Konva 渲染地图和设备 -->
-        <div class="canvas-container" ref="mapContainerRef">
+        <div class="canvas-wrapper" ref="mapContainerRef">
           <v-stage :config="stageConfig"
                    @click="handleStageClick"
+                   @mousemove="handleGlobalMouseMove"
                    @dragstart="handleStageDragStart"
                    @dragend="handleStageDragEnd"
                    @wheel="handleWheel">
             <!-- 背景层：渲染地图（海侧、堆场、充电站） -->
             <v-layer name="background">
-              <!-- 海侧区域 -->
-              <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: MAP_UI.seaSideHeight, fill: '#bbdefb' }" />
+              <!-- 海侧区域：name: 'map-bg' 供全局事件委托拾取 -->
+              <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: MAP_UI.seaSideHeight, fill: '#bbdefb', name: 'map-bg' }" />
               <v-text :config="{ x: 20, y: MAP_UI.seaSideY, text: '海侧区域', fontSize: MAP_UI.seaSideFontSize, fill: '#1565c0', opacity: 0.5 }" />
 
               <!-- 动态渲染堆场方块 -->
@@ -177,38 +178,39 @@
             </v-layer>
 
             <v-layer name="devices">
-              <!-- 渲染所有设备，并根据状态显示不同样式 -->
+              <!-- 渲染所有设备：name/id 注入供全局事件委托拾取，不再散装绑定 @click -->
               <v-group v-for="(dev, deviceIdKey) in displayDevices" :key="deviceIdKey"
-                       :config="{ x: dev.posX, y: dev.posY }"
-                       @click="(e) => handleDeviceSelect(e, deviceIdKey)"
-                       @mouseenter="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'pointer'; }"
-                       @mouseleave="(e) => { const container = e.target.getStage().container(); container.style.cursor = 'default'; }">
+                       :config="{ x: dev.posX, y: dev.posY, rotation: dev.rotation || 0, name: 'device-group', id: String(deviceIdKey) }">
+
+                <!-- 透明大热区：确保鼠标在任何角度点击设备都能命中 -->
+                <v-rect :config="{ x: -25, y: -25, width: 50, height: 50, fill: '#000000', opacity: 0.001 }" />
 
                 <!-- 选中状态高亮边框 -->
                 <v-rect v-if="simStore.selectedDeviceId === String(deviceIdKey)"
                         :config="{
-                    x: -22, y: -22,
-                    width: MAP_UI.craneSize + 4,
-                    height: MAP_UI.craneSize + 4,
+                    x: -24, y: -24,
+                    width: MAP_UI.craneSize + 8,
+                    height: MAP_UI.craneSize + 8,
                     stroke: '#ffeb3b',
                     strokeWidth: 3,
-                    cornerRadius: 4
+                    cornerRadius: 4,
+                    listening: false
                   }" />
 
-                <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等，扩大热区 -->
+                <!-- 根据设备类型绘制不同形状：QC、ASC、卡车等，hitStrokeWidth=20 扩大热区 -->
                 <template v-if="dev.type === 'QC' || dev.type === 'CRANE_QC'">
-                  <v-rect :config="{ x: -20, y: -20, width: MAP_UI.craneSize, height: MAP_UI.craneSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4, hitStrokeWidth: 15 }" />
-                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: dev.isAlerting ? '#ff0000' : '#ff9800' }" />
+                  <v-rect :config="{ x: -20, y: -20, width: MAP_UI.craneSize, height: MAP_UI.craneSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#ff9800', strokeWidth: 4, hitStrokeWidth: 20 }" />
+                  <v-circle :config="{ x: 0, y: 0, radius: 5, fill: dev.isAlerting ? '#ff0000' : '#ff9800', hitStrokeWidth: 20 }" />
                 </template>
                 <template v-else-if="dev.type === 'ASC' || dev.type === 'CRANE_ASC'">
-                  <v-rect :config="{ x: -15, y: -15, width: MAP_UI.ascSize, height: MAP_UI.ascSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4, hitStrokeWidth: 15 }" />
+                  <v-rect :config="{ x: -15, y: -15, width: MAP_UI.ascSize, height: MAP_UI.ascSize, fill: '#fff', stroke: dev.isAlerting ? '#ff0000' : '#4caf50', strokeWidth: 4, hitStrokeWidth: 20 }" />
                 </template>
                 <template v-else-if="dev.type === 'ELECTRIC_TRUCK' || dev.type === 'INTERNAL_TRUCK'">
-                  <v-rect :config="{ x: -12, y: -6, width: MAP_UI.truckWidth, height: MAP_UI.truckHeight, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2, hitStrokeWidth: 15 }" />
+                  <v-rect :config="{ x: -12, y: -6, width: MAP_UI.truckWidth, height: MAP_UI.truckHeight, fill: dev.isAlerting ? '#ff0000' : '#2196f3', cornerRadius: 2, hitStrokeWidth: 20 }" />
                 </template>
 
                 <!-- 显示设备 ID -->
-                <v-text :config="{ x: MAP_UI.idOffsetX, y: MAP_UI.idOffsetY, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333' }" />
+                <v-text :config="{ x: MAP_UI.idOffsetX, y: MAP_UI.idOffsetY, text: dev.id, fontSize: 12, fill: dev.isAlerting ? '#ff0000' : '#333', listening: false }" />
               </v-group>
 
               <!-- 目标位置标记（十字准星）和移动指令连线 -->
@@ -329,6 +331,7 @@
     </div>
   </div>
 </template>
+
 
 <script setup lang="ts">
 // @ts-nocheck
@@ -529,7 +532,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   // 清理资源：断开 WebSocket 连接，停止动画
   wsService.disconnect();
-  simStore.stopSnapshotPolling();
   simStore.stopAutoPlay();
   if (animFrameId) cancelAnimationFrame(animFrameId);
 })
@@ -678,28 +680,52 @@ const handleSpeedChange = (val: number) => {
   simStore.setSpeed(val)
 }
 
-// 处理画布点击事件
-const handleStageClick = (evt: any) => {
-  // 【核心修复】：如果点击的不是底图(Stage)本身，说明点到了设备上，直接退出，防止重置选中状态！
-  if (evt.target !== evt.target.getStage()) {
+// 【全局事件委托】统一接管 Stage 上的所有点击
+// 利用 Konva 的 findAncestor 向上遍历 Node 树，精准识别点击目标
+const handleStageClick = (e: any) => {
+  if (isDragging.value) return;
+
+  const target = e.target;
+  const stage = target.getStage();
+
+  // 1. 向上查找最近的 device-group 祖先（target 本身如果就是 group 也算）
+  const clickedDeviceGroup = target.findAncestor('.device-group', true);
+  if (clickedDeviceGroup) {
+    const deviceId = clickedDeviceGroup.id();
+    if (!deviceId || deviceId === 'undefined') {
+      console.error('事件委托：命中设备节点但 id 为空！', clickedDeviceGroup);
+      return;
+    }
+    console.log('🎯 成功命中设备节点:', deviceId);
+    simStore.selectDevice(deviceId);
     return;
   }
 
-  // 如果在拖拽过程中或刚结束拖拽，则不触发选择目标
-  if (isDragging.value) {
-    isDragging.value = false
-    return
-  }
-
-  // 如果已经有选中的设备，则点击背景时设置目标位置
+  // 2. 未命中设备 → 所有其他点击（堆场、路径线、空白区域）均视为地图背景操作
+  //    不能只判断 name === 'map-bg'，否则点击堆场方块时目标设置会被静默吞掉
   if (simStore.selectedDeviceId) {
-    const stage = evt.target.getStage();
+    // 已选中设备：将点击位置转为画布坐标（正确处理缩放和平移）
+    const transform = stage.getAbsoluteTransform().copy();
+    transform.invert();
     const pointerPos = stage.getPointerPosition();
     if (pointerPos) {
-      simStore.selectTarget(pointerPos.x, pointerPos.y);
+      const pos = transform.point(pointerPos);
+      console.log(`📍 设置目标坐标: x=${pos.x.toFixed(1)}, y=${pos.y.toFixed(1)}`);
+      simStore.selectTarget(pos.x, pos.y);
     }
+  } else {
+    simStore.clearSelection();
   }
-}
+};
+
+// 【全局鼠标指针管理】替代散装的 @mouseenter / @mouseleave
+const handleGlobalMouseMove = (e: any) => {
+  if (isDragging.value) return;
+  const target = e.target;
+  const stage = target.getStage();
+  const isHoveringDevice = !!target.findAncestor('.device-group', true);
+  stage.container().style.cursor = isHoveringDevice ? 'pointer' : 'default';
+};
 
 // 处理拖拽开始
 const handleStageDragStart = (evt: any) => {
@@ -767,56 +793,48 @@ const handleMoveToTarget = async () => {
   const targetPos = simStore.selectedTargetPos;
 
   if (!deviceId) {
-    ElMessage.warning('发送失败：未获取到有效设备，请在画布上重新点击选中设备！');
+    ElMessage.error('发送拦截：设备ID为空，请在地图上重新点击选中设备！');
     return;
   }
   if (!targetPos) {
-    ElMessage.warning('发送失败：请先点击地图空白处设置目标坐标(红色准星)！');
+    ElMessage.warning('发送拦截：请先点击地图空白处产生红色准星（目标点）！');
     return;
   }
 
-  const device = simStore.selectedDevice;
+  const payload = {
+    deviceId: deviceId,
+    destinationX: Number(targetPos.x),
+    destinationY: Number(targetPos.y)
+  };
+
+  console.log('🚀 正在发送移动指令 Payload:', payload);
 
   try {
-    if (device.type === 'ELECTRIC_TRUCK' || device.type === 'INTERNAL_TRUCK') {
-      // 调用卡车移动接口
-      await moveTruck({
-        deviceId: deviceId,
-        destinationX: targetPos.x,
-        destinationY: targetPos.y
-      });
-      // 记录下发指令的设备位置，用于显示连线
-      simStore.pendingMoveCommand = {
-        fromX: device.posX,
-        fromY: device.posY,
-        toX: targetPos.x,
-        toY: targetPos.y
-      };
-      ElMessage.success(`指令已发送至设备: ${deviceId}`);
-      simStore.clearTarget(); // 发送成功后清空准星
-    } else if (device.type === 'QC' || device.type === 'CRANE_QC' || device.type === 'ASC' || device.type === 'CRANE_ASC') {
-      // 调用起重机移动接口
-      await moveCrane({
-        deviceId: deviceId,
-        destinationX: targetPos.x,
-        destinationY: targetPos.y
-      });
-      // 记录下发指令的设备位置，用于显示连线
-      simStore.pendingMoveCommand = {
-        fromX: device.posX,
-        fromY: device.posY,
-        toX: targetPos.x,
-        toY: targetPos.y
-      };
-      ElMessage.success(`指令已发送至设备: ${deviceId}`);
-      simStore.clearTarget(); // 发送成功后清空准星
+    // 通过设备 ID 前缀判断设备类型，避免依赖 selectedDevice.type 可能为空的问题
+    const isCrane = deviceId.startsWith('QC') || deviceId.startsWith('ASC') ||
+        deviceId.startsWith('CRANE');
+    if (isCrane) {
+      await moveCrane(payload);
     } else {
-      ElMessage.warning('不支持的设备类型');
-      return;
+      await moveTruck(payload);
     }
-  } catch (e: any) {
-    ElMessage.error('发送移动指令失败，请查看控制台或后端日志');
-    console.error('移动指令错误:', e);
+
+    // 记录指令连线所需的起点信息
+    const device = simStore.selectedDevice;
+    if (device) {
+      simStore.pendingMoveCommand = {
+        fromX: device.posX,
+        fromY: device.posY,
+        toX: payload.destinationX,
+        toY: payload.destinationY
+      };
+    }
+
+    ElMessage.success(`指令发送成功: [${deviceId}] -> (${payload.destinationX.toFixed(1)}, ${payload.destinationY.toFixed(1)})`);
+    simStore.clearTarget();
+  } catch (error: any) {
+    console.error('移动指令错误:', error);
+    ElMessage.error(`后端拒绝: ${error.response?.data?.message || error.message || '未知异常'}`);
   }
 }
 
@@ -894,7 +912,7 @@ const handleReset = async () => {
 }
 
 /* ===================== 主内容区：横向 Flex ===================== */
-.main-content {
+.dashboard-layout {
   display: flex;
   flex-direction: row;
   flex: 1;
@@ -903,7 +921,7 @@ const handleReset = async () => {
 }
 
 /* 左侧区域：画布 + 日志，纵向排列 */
-.left-section {
+.main-view {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -912,7 +930,7 @@ const handleReset = async () => {
 }
 
 /* 画布容器：填满左侧剩余空间 */
-.canvas-container {
+.canvas-wrapper {
   flex: 1;
   background: #e6e9f0;
   overflow: hidden;
