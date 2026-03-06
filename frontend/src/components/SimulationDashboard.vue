@@ -309,6 +309,18 @@
             <span class="label">目标位置:</span>
             <span class="value highlight">({{ simStore.selectedTargetPos.x }}, {{ simStore.selectedTargetPos.y }})</span>
           </div>
+          <div class="info-row">
+            <span class="label">指令速度:</span>
+            <el-input-number
+                v-model="commandSpeed"
+                :min="1"
+                :max="20"
+                :step="1"
+                size="small"
+                style="width: 120px"
+            />
+            <span class="value" style="margin-left:4px;color:#888">m/s</span>
+          </div>
           <div class="action-buttons">
             <el-button
                 type="primary"
@@ -325,6 +337,19 @@
             >
               充电
             </el-button>
+          </div>
+
+          <!-- 交接区快捷面板：仅当选中设备进入某个交接区时显示 -->
+          <div v-if="activeTransferZone" class="transfer-zone-panel">
+            <div class="tz-header">
+              <span class="tz-icon">📍</span>
+              <span>身处交接区：<strong>{{ activeTransferZone.name || activeTransferZone.zoneId }}</strong></span>
+            </div>
+            <div class="tz-type">类型：{{ activeTransferZone.type }}</div>
+            <div class="tz-actions">
+              <el-button type="primary" size="small" @click="handleTask('FETCH')">抓取作业 (Fetch)</el-button>
+              <el-button type="warning" size="small" @click="handleTask('PUT')">放置作业 (Put)</el-button>
+            </div>
           </div>
         </div>
 
@@ -396,6 +421,8 @@ const jsonFileInput = ref<HTMLInputElement | null>(null)
 const playbackSpeed = ref(1.0)
 const lastFrameTime = ref(0)
 const logFilter = ref<'all' | 'movement' | 'crane'>('all')
+// 指令速度：前端作为"人肉算法层"必须显式下发 speed，后端不设保底值
+const commandSpeed = ref(5.0)
 // 用于区分拖拽和点击
 const isDragging = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
@@ -425,6 +452,21 @@ const flattenPathNodes = (nodes: { x: number, y: number }[]): number[] => {
   })
   return points
 }
+
+/**
+ * 当前选中设备是否身处某个交接区（AABB 碰撞检测）。
+ * 后端 TransferZoneDto 使用 xRange[min,max] / yRange[min,max] 数组结构。
+ * 返回匹配的交接区对象，或 null（无选中设备 / 不在任何区域内）。
+ */
+const activeTransferZone = computed(() => {
+  const dev = simStore.selectedDevice
+  if (!dev || !simStore.transferZones) return null
+  return simStore.transferZones.find((tz: any) => {
+    if (!tz.xRange || !tz.yRange) return false
+    return dev.posX >= tz.xRange[0] && dev.posX <= tz.xRange[1] &&
+        dev.posY >= tz.yRange[0] && dev.posY <= tz.yRange[1]
+  }) ?? null
+})
 
 // 计算属性：根据过滤条件返回日志
 const filteredEvents = computed(() => {
@@ -825,7 +867,7 @@ const handleMoveToTarget = async () => {
           ? Number((targetPos.x - (device?.posX ?? 0)).toFixed(2))
           : Number((targetPos.y - (device?.posY ?? 0)).toFixed(2));
 
-      const payload = { craneId: deviceId, moveType, distance, speed: 5.0 };
+      const payload = { craneId: deviceId, moveType, distance, speed: commandSpeed.value };
       console.log('🚀 发送起重机指令 Payload:', payload);
       await moveCrane(payload);
 
@@ -835,7 +877,7 @@ const handleMoveToTarget = async () => {
       const payload = {
         truckId: deviceId,
         targetPoint: { x: Number(targetPos.x), y: Number(targetPos.y) },
-        speed: 5.0
+        speed: commandSpeed.value
       };
       console.log('🚀 发送集卡指令 Payload:', payload);
       await moveTruck(payload);
@@ -880,6 +922,34 @@ const handleCharge = async () => {
     ElMessage.success(`已发送充电指令: ${simStore.selectedDeviceId}`);
   } catch (e: any) {
     ElMessage.error('发送充电指令失败: ' + e.message);
+  }
+}
+
+/**
+ * 交接区快捷作业指令（FETCH = 抓取，PUT = 放置）。
+ * 触发 /sim/command/crane/operate，参数由当前选中设备 + 交接区确定。
+ */
+const handleTask = async (opType: 'FETCH' | 'PUT') => {
+  const deviceId = simStore.selectedDeviceId
+  if (!deviceId) {
+    ElMessage.warning('请先在地图上选中起重机设备')
+    return
+  }
+  const tz = activeTransferZone.value
+  if (!tz) {
+    ElMessage.warning('设备未处于交接区，无法触发作业')
+    return
+  }
+  try {
+    await operateCrane({
+      craneId: deviceId,
+      operation: opType,
+      durationMS: 3000,
+      zoneId: tz.zoneId
+    })
+    ElMessage.success(`[${deviceId}] ${opType === 'FETCH' ? '抓取' : '放置'}作业指令已发送 (交接区: ${tz.name || tz.zoneId})`)
+  } catch (e: any) {
+    ElMessage.error(`作业指令失败: ${e.response?.data?.message || e.message}`)
   }
 }
 
@@ -1016,6 +1086,39 @@ const handleReset = async () => {
   display: flex;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* ===================== 交接区快捷面板 ===================== */
+.transfer-zone-panel {
+  margin-top: 14px;
+  padding: 12px;
+  background: #fff3e0;
+  border: 1px solid #ffb74d;
+  border-radius: 6px;
+}
+
+.tz-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #e65100;
+  margin-bottom: 4px;
+}
+
+.tz-icon {
+  font-size: 15px;
+}
+
+.tz-type {
+  font-size: 11px;
+  color: #bf360c;
+  margin-bottom: 10px;
+}
+
+.tz-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* ===================== 业务逻辑拦截台 ===================== */

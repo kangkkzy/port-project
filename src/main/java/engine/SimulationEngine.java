@@ -97,6 +97,20 @@ public class SimulationEngine implements InitializingBean {
     private volatile boolean isPaused = true;
 
     /**
+     * 仿真时钟倍速（TIME_SCALE=2.0 表示仿真以 2 倍实时速度推进）。
+     * 即：真实流逝 1ms → 仿真推进 2ms。
+     */
+    private volatile double timeScale = 2.0;
+
+    /**
+     * 引擎内部唤醒锁。
+     * runLoop 在无事件或时间未到时通过 lock.wait() 挂起；
+     * scheduleEvent 在入队新事件后调用 lock.notifyAll() 立即唤醒。
+     * 这样可彻底避免长 sleep 期间对新指令无响应的死锁风险。
+     */
+    private final Object engineLock = new Object();
+
+    /**
      * 回放速度倍率。
      * 1.0 = 实时（1ms 仿真时间对应 1ms 真实时间）
      * 2.0 = 2倍速，0.5 = 0.5倍速
@@ -146,6 +160,10 @@ public class SimulationEngine implements InitializingBean {
         SimEvent event = new SimEvent(parentEventId, triggerTime, type, data);
         eventQueue.add(event);
         eventIdMap.put(event.getEventId(), event);
+        // 有新事件入队，立刻唤醒后台 runLoop，防止其在 wait() 中错过事件
+        synchronized (engineLock) {
+            engineLock.notifyAll();
+        }
         return event;
     }
 
@@ -364,23 +382,60 @@ public class SimulationEngine implements InitializingBean {
     /**
      * 后台事件循环（由 start() 通过 CompletableFuture 异步调用，禁止手动调用）。
      *
-     * 设计原则：
-     * - 每轮取出并处理一个事件（通过 processNextEventInternal）
-     * - 队列为空时短暂 sleep，避免空转 CPU
-     * - BusinessException 会在 processEvent 内触发熔断，外层只捕获未预期异常
+     * 核心机制：微滴答实时时钟推进 + 锁唤醒
+     * ─────────────────────────────────────────────────────────
+     * 1. 每轮根据真实流逝时间 × timeScale 推进仿真时钟。
+     * 2. 若队首事件的触发时间已到，立即处理并广播快照。
+     * 3. 若时间未到或队列为空，调用 engineLock.wait(20) 微休眠；
+     *    scheduleEvent() 会在入队新事件时 notifyAll() 立刻唤醒，
+     *    彻底解决"长 sleep 期间新指令无响应"的死锁问题。
+     * ─────────────────────────────────────────────────────────
      */
     private void runLoop() {
-        log.info("引擎后台循环已启动 (threadId={})", Thread.currentThread().getId());
+        log.info("引擎后台循环已启动 (threadId={}, timeScale={}x)", Thread.currentThread().getId(), timeScale);
+        long lastRealTime = System.currentTimeMillis();
+
         while (engineState == EngineState.RUNNING) {
             try {
-                if (eventQueue.isEmpty()) {
-                    Thread.sleep(100);
+                SimEvent nextEvent = eventQueue.peek();
+
+                // ── 队列为空：挂起等待新事件入队（notifyAll 唤醒）──
+                if (nextEvent == null) {
+                    synchronized (engineLock) {
+                        engineLock.wait(1000);
+                    }
+                    lastRealTime = System.currentTimeMillis(); // 休眠期间真实时间已流逝，重置基准
                     continue;
                 }
-                synchronized (this) {
-                    processNextEventInternal();
+
+                // ── 按真实时间流逝 × timeScale 推进仿真时钟 ──
+                long nowRealTime = System.currentTimeMillis();
+                long realDelta = nowRealTime - lastRealTime;
+                lastRealTime = nowRealTime;
+                long newSimTime = context.getSimTime() + (long)(realDelta * timeScale);
+                context.setSimTime(newSimTime);
+
+                // ── 仿真时钟到达事件触发时间，立即执行 ──
+                if (newSimTime >= nextEvent.getTriggerTime()) {
+                    SimEvent event = eventQueue.poll();
+                    if (event != null) {
+                        processEvent(event);
+                        // 广播事件给前端（broadcast 内部已按 BROADCAST_EVENTS 过滤非关键事件）
+                        if (webSocketService != null) {
+                            try {
+                                webSocketService.broadcast(event);
+                            } catch (Exception broadcastEx) {
+                                log.warn("事件广播失败（不影响仿真继续运行）: {}", broadcastEx.getMessage());
+                            }
+                        }
+                    }
+                } else {
+                    // ── 时间未到：微休眠 20ms，同时等待被新指令唤醒 ──
+                    synchronized (engineLock) {
+                        engineLock.wait(20);
+                    }
                 }
-                Thread.sleep(50);
+
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 log.warn("引擎后台循环被中断，退出。");
@@ -436,6 +491,15 @@ public class SimulationEngine implements InitializingBean {
 
     public double getPlaybackSpeed() {
         return playbackSpeed;
+    }
+
+    public void setTimeScale(double scale) {
+        this.timeScale = scale;
+        log.info("仿真时钟倍速已设置为: {}x", scale);
+    }
+
+    public double getTimeScale() {
+        return timeScale;
     }
 
     public void setTimeSyncEnabled(boolean enabled) {

@@ -9,8 +9,10 @@ import engine.SimEventHandler;
 import engine.SimulationEngine;
 import engine.context.GlobalContext;
 import model.dto.request.CraneMoveReq;
+import model.entity.AscDevice;
 import model.entity.BaseDevice;
 import model.entity.Point;
+import model.entity.QcDevice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -132,6 +134,24 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             }
         } else {
             targetPoint = new Point(posX + distance, posY);
+        }
+
+        // ── instanceof 物理轴向锁定（第二道防线，防止类型系统之外的意外绕过）──
+        // 注：第一道防线是上方的 moveType 枚举检查，两道防线互补
+        if (device instanceof QcDevice) {
+            double deltaY = Math.abs(targetPoint.getY() - posY);
+            if (deltaY > 0.5) {
+                throw new BusinessException(String.format(
+                        "物理违规: 岸桥(QC) [%s] 只能沿 X 轴水平移动！当前Y=%.1f，目标Y=%.1f，偏差=%.2f",
+                        craneId, posY, targetPoint.getY(), deltaY));
+            }
+        } else if (device instanceof AscDevice) {
+            double deltaX = Math.abs(targetPoint.getX() - posX);
+            if (deltaX > 0.5) {
+                throw new BusinessException(String.format(
+                        "物理违规: 场桥(ASC) [%s] 只能沿 Y 轴垂直移动！当前X=%.1f，目标X=%.1f，偏差=%.2f",
+                        craneId, posX, targetPoint.getX(), deltaX));
+            }
         }
 
         device.setSpeed(speed);
