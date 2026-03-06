@@ -81,6 +81,9 @@ public class ScenarioLoaderService {
                 QcDevice entity = toQc(q);
                 ctx.getQcMap().put(entity.getId(), entity);
                 qcs++;
+                // 轨道约束预警：QC 应在 QC_RAIL（水平轨道）上，posY 应与 qcRailY 吻合
+                log.info("QC [{}] 初始坐标: ({}, {}). 请确认 posY 落在 map-config.json 中 QC_RAIL 的 position 值上。",
+                        entity.getId(), entity.getPosX(), entity.getPosY());
             }
         }
         if (dto.getInitAscs() != null) {
@@ -88,6 +91,9 @@ public class ScenarioLoaderService {
                 AscDevice entity = toAsc(a);
                 ctx.getAscMap().put(entity.getId(), entity);
                 ascs++;
+                // 轨道约束预警：ASC 应在 ASC_RAIL（垂直轨道）上，posX 应与 ascRailX 吻合
+                log.info("ASC [{}] 初始坐标: ({}, {}). 请确认 posX 落在 map-config.json 中 ASC_RAIL 的 position 值上。",
+                        entity.getId(), entity.getPosX(), entity.getPosY());
             }
         }
         if (dto.getInitContainers() != null) {

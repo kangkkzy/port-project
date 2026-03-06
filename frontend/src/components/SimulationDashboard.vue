@@ -812,36 +812,43 @@ const handleMoveToTarget = async () => {
     return;
   }
 
-  const payload = {
-    deviceId: deviceId,
-    destinationX: Number(targetPos.x),
-    destinationY: Number(targetPos.y)
-  };
-
-  console.log('🚀 正在发送移动指令 Payload:', payload);
+  const device = simStore.selectedDevice;
+  const isQC  = deviceId.startsWith('QC');
+  const isASC = deviceId.startsWith('ASC') || deviceId.startsWith('CRANE');
+  const isCrane = isQC || isASC;
 
   try {
-    // 通过设备 ID 前缀判断设备类型，避免依赖 selectedDevice.type 可能为空的问题
-    const isCrane = deviceId.startsWith('QC') || deviceId.startsWith('ASC') ||
-        deviceId.startsWith('CRANE');
     if (isCrane) {
+      // CraneMoveReq: craneId + moveType(MOVE_HORIZONTAL/MOVE_VERTICAL) + distance + speed
+      // QC 沿 X 轴移动（水平），ASC 沿 Y 轴移动（垂直）
+      const moveType = isQC ? 'MOVE_HORIZONTAL' : 'MOVE_VERTICAL';
+      const distance = isQC
+          ? Number((targetPos.x - (device?.posX ?? 0)).toFixed(2))
+          : Number((targetPos.y - (device?.posY ?? 0)).toFixed(2));
+
+      const payload = { craneId: deviceId, moveType, distance, speed: 5.0 };
+      console.log('🚀 发送起重机指令 Payload:', payload);
       await moveCrane(payload);
+
+      ElMessage.success(`指令发送成功: [${deviceId}] ${moveType} ${distance >= 0 ? '+' : ''}${distance}m`);
     } else {
+      // MoveCommandReq: truckId + targetPoint: {x, y}
+      const payload = {
+        truckId: deviceId,
+        targetPoint: { x: Number(targetPos.x), y: Number(targetPos.y) }
+      };
+      console.log('🚀 发送集卡指令 Payload:', payload);
       await moveTruck(payload);
+
+      ElMessage.success(`指令发送成功: [${deviceId}] -> (${targetPos.x.toFixed(1)}, ${targetPos.y.toFixed(1)})`);
     }
 
-    // 记录指令连线所需的起点信息
-    const device = simStore.selectedDevice;
     if (device) {
       simStore.pendingMoveCommand = {
-        fromX: device.posX,
-        fromY: device.posY,
-        toX: payload.destinationX,
-        toY: payload.destinationY
+        fromX: device.posX, fromY: device.posY,
+        toX: Number(targetPos.x), toY: Number(targetPos.y)
       };
     }
-
-    ElMessage.success(`指令发送成功: [${deviceId}] -> (${payload.destinationX.toFixed(1)}, ${payload.destinationY.toFixed(1)})`);
     simStore.clearTarget();
   } catch (error: any) {
     console.error('移动指令错误:', error);
@@ -868,9 +875,8 @@ const handleCharge = async () => {
   }
 
   try {
-    await chargeTruck({
-      deviceId: simStore.selectedDeviceId
-    });
+    // ChargeCommandReq: truckId (不是 deviceId)
+    await chargeTruck({ truckId: simStore.selectedDeviceId });
     ElMessage.success(`已发送充电指令: ${simStore.selectedDeviceId}`);
   } catch (e: any) {
     ElMessage.error('发送充电指令失败: ' + e.message);

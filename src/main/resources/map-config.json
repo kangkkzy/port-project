@@ -1,38 +1,28 @@
 {
   "coordinates": {
-    "BERTH_01": 150.0,
-    "BERTH_02": 400.0,
-    "BERTH_03": 630.0,
-    "YARD_A": 115.0,
-    "YARD_B": 275.0,
-    "YARD_C": 435.0,
-    "YARD_D": 595.0,
-    "YARD_E": 715.0,
-    "GATE_IN": 50.0,
-    "GATE_OUT": 750.0
+    "BERTH_01": 300.0,
+    "YARD_A":   200.0,
+    "YARD_B":   400.0,
+    "GATE_IN":  100.0,
+    "GATE_OUT": 600.0
   },
   "parameters": {
     "minQcDistance": 30.0,
     "truckSpeed": 10.0,
-    "qcSpeed": 1.5,
-    "ascSpeed": 2.0,
-    "truckRoadTolerance": 5.0,
-    "qcRailTolerance": 3.0,
-    "ascRailTolerance": 3.0,
-    "transferZoneTolerance": 5.0
+    "qcSpeed": 5.0,
+    "ascSpeed": 5.0,
+    "truckRoadTolerance": 8.0,
+    "qcRailTolerance": 5.0,
+    "ascRailTolerance": 5.0,
+    "transferZoneTolerance": 10.0
   },
   "yardBlocks": [
-    { "blockCode": "YARD_A", "posX": 60.0,  "posY": 215.0, "width": 110.0, "length": 200.0 },
-    { "blockCode": "YARD_B", "posX": 220.0, "posY": 215.0, "width": 110.0, "length": 200.0 },
-    { "blockCode": "YARD_C", "posX": 380.0, "posY": 215.0, "width": 110.0, "length": 200.0 },
-    { "blockCode": "YARD_D", "posX": 540.0, "posY": 215.0, "width": 110.0, "length": 200.0 },
-    { "blockCode": "YARD_E", "posX": 660.0, "posY": 215.0, "width": 110.0, "length": 200.0 }
+    { "blockCode": "YARD_A", "posX": 180.0, "posY": 250.0, "width": 40.0, "length": 200.0 },
+    { "blockCode": "YARD_B", "posX": 380.0, "posY": 250.0, "width": 40.0, "length": 200.0 }
   ],
   "chargingStations": [
-    { "stationCode": "CHARGE_W1", "posX": 25.0,  "posY": 460.0 },
-    { "stationCode": "CHARGE_W2", "posX": 25.0,  "posY": 490.0 },
-    { "stationCode": "CHARGE_E1", "posX": 760.0, "posY": 460.0 },
-    { "stationCode": "CHARGE_E2", "posX": 760.0, "posY": 490.0 }
+    { "stationCode": "CHARGE_01", "posX": 580.0, "posY": 155.0 },
+    { "stationCode": "CHARGE_02", "posX": 615.0, "posY": 155.0 }
   ],
   "paths": [
     {
@@ -40,170 +30,77 @@
       "pathId": "QC_RAIL_01",
       "name": "岸桥轨道",
       "direction": "HORIZONTAL",
-      "position": 120.0,
-      "startPoint": 20.0,
-      "endPoint": 780.0
+      "position": 100.0,
+      "startPoint": 100.0,
+      "endPoint": 600.0
     },
     {
       "pathType": "ASC_RAIL",
       "pathId": "ASC_RAIL_A",
       "name": "场桥轨道A",
       "direction": "VERTICAL",
-      "position": 115.0,
-      "startPoint": 210.0,
-      "endPoint": 420.0
+      "position": 200.0,
+      "startPoint": 250.0,
+      "endPoint": 450.0
     },
     {
       "pathType": "ASC_RAIL",
       "pathId": "ASC_RAIL_B",
       "name": "场桥轨道B",
       "direction": "VERTICAL",
-      "position": 275.0,
-      "startPoint": 210.0,
-      "endPoint": 420.0
-    },
-    {
-      "pathType": "ASC_RAIL",
-      "pathId": "ASC_RAIL_C",
-      "name": "场桥轨道C",
-      "direction": "VERTICAL",
-      "position": 435.0,
-      "startPoint": 210.0,
-      "endPoint": 420.0
-    },
-    {
-      "pathType": "ASC_RAIL",
-      "pathId": "ASC_RAIL_D",
-      "name": "场桥轨道D",
-      "direction": "VERTICAL",
-      "position": 595.0,
-      "startPoint": 210.0,
-      "endPoint": 420.0
-    },
-    {
-      "pathType": "ASC_RAIL",
-      "pathId": "ASC_RAIL_E",
-      "name": "场桥轨道E",
-      "direction": "VERTICAL",
-      "position": 715.0,
-      "startPoint": 210.0,
-      "endPoint": 420.0
+      "position": 400.0,
+      "startPoint": 250.0,
+      "endPoint": 450.0
     },
     {
       "pathType": "TRUCK_ROAD",
-      "pathId": "TRUCK_ROAD_SEA_1",
-      "name": "海侧集卡内道",
+      "pathId": "TRUCK_ROAD_MAIN",
+      "name": "海侧集卡主干道",
       "direction": "HORIZONTAL",
-      "position": 152.0,
-      "startPoint": 20.0,
-      "endPoint": 780.0
+      "position": 150.0,
+      "startPoint": 80.0,
+      "endPoint": 660.0
     },
     {
       "pathType": "TRUCK_ROAD",
-      "pathId": "TRUCK_ROAD_SEA_2",
-      "name": "海侧集卡外道",
-      "direction": "HORIZONTAL",
-      "position": 182.0,
-      "startPoint": 20.0,
-      "endPoint": 780.0
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "pathId": "TRUCK_ROAD_YARD_TOP",
-      "name": "堆场北侧通道",
-      "direction": "HORIZONTAL",
-      "position": 208.0,
-      "startPoint": 20.0,
-      "endPoint": 780.0
+      "pathId": "TRUCK_ROAD_YARD",
+      "name": "堆场间纵向通道",
+      "direction": "VERTICAL",
+      "position": 300.0,
+      "startPoint": 150.0,
+      "endPoint": 500.0
     },
     {
       "pathType": "TRUCK_ROAD",
       "pathId": "TRUCK_ROAD_YARD_BTM",
       "name": "堆场南侧通道",
       "direction": "HORIZONTAL",
-      "position": 428.0,
-      "startPoint": 20.0,
-      "endPoint": 780.0
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "pathId": "TRUCK_ROAD_LEFT",
-      "name": "西侧纵向通道",
-      "direction": "VERTICAL",
-      "position": 22.0,
-      "startPoint": 120.0,
-      "endPoint": 480.0
-    },
-    {
-      "pathType": "TRUCK_ROAD",
-      "pathId": "TRUCK_ROAD_RIGHT",
-      "name": "东侧纵向通道",
-      "direction": "VERTICAL",
-      "position": 778.0,
-      "startPoint": 120.0,
-      "endPoint": 480.0
+      "position": 460.0,
+      "startPoint": 80.0,
+      "endPoint": 660.0
     }
   ],
   "transferZones": [
     {
-      "zoneId": "QC_TRANSFER_BERTH_01",
-      "name": "泊位1_QC交接区",
+      "zoneId": "TZ_QC_BERTH01",
+      "name": "QC交接区",
       "type": "QC_TRANSFER",
-      "description": "集卡与QC的装卸只能在此区域内发生",
-      "qcPosition": 120.0,
-      "truckPositions": [152.0, 182.0],
-      "xRange": [100.0, 220.0],
-      "yRange": [115.0, 190.0]
+      "xRange": [260.0, 340.0],
+      "yRange": [92.0, 160.0]
     },
     {
-      "zoneId": "QC_TRANSFER_BERTH_02",
-      "name": "泊位2_QC交接区",
-      "type": "QC_TRANSFER",
-      "description": "集卡与QC的装卸只能在此区域内发生",
-      "qcPosition": 120.0,
-      "truckPositions": [152.0, 182.0],
-      "xRange": [350.0, 470.0],
-      "yRange": [115.0, 190.0]
-    },
-    {
-      "zoneId": "ASC_TRANSFER_YARD_A",
-      "name": "堆场A_ASC交接区",
+      "zoneId": "TZ_ASC_A_TOP",
+      "name": "堆场A北端交接区",
       "type": "ASC_TRANSFER",
-      "description": "集卡与ASC的装卸只能在此区域内发生",
-      "ascPosition": 115.0,
-      "truckPositions": [208.0, 428.0],
-      "xRange": [55.0, 175.0],
-      "yRange": [200.0, 440.0]
+      "xRange": [170.0, 230.0],
+      "yRange": [240.0, 265.0]
     },
     {
-      "zoneId": "ASC_TRANSFER_YARD_B",
-      "name": "堆场B_ASC交接区",
+      "zoneId": "TZ_ASC_B_TOP",
+      "name": "堆场B北端交接区",
       "type": "ASC_TRANSFER",
-      "description": "集卡与ASC的装卸只能在此区域内发生",
-      "ascPosition": 275.0,
-      "truckPositions": [208.0, 428.0],
-      "xRange": [215.0, 335.0],
-      "yRange": [200.0, 440.0]
-    },
-    {
-      "zoneId": "ASC_TRANSFER_YARD_C",
-      "name": "堆场C_ASC交接区",
-      "type": "ASC_TRANSFER",
-      "description": "集卡与ASC的装卸只能在此区域内发生",
-      "ascPosition": 435.0,
-      "truckPositions": [208.0, 428.0],
-      "xRange": [375.0, 495.0],
-      "yRange": [200.0, 440.0]
-    },
-    {
-      "zoneId": "ASC_TRANSFER_YARD_D",
-      "name": "堆场D_ASC交接区",
-      "type": "ASC_TRANSFER",
-      "description": "集卡与ASC的装卸只能在此区域内发生",
-      "ascPosition": 595.0,
-      "truckPositions": [208.0, 428.0],
-      "xRange": [535.0, 655.0],
-      "yRange": [200.0, 440.0]
+      "xRange": [370.0, 430.0],
+      "yRange": [240.0, 265.0]
     }
   ]
 }
