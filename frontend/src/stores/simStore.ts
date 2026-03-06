@@ -209,6 +209,11 @@ export const useSimStore = defineStore('simulation', {
             this.selectedTargetPos = { x, y };
         },
 
+        /** 仅清空目标位置（保留已选中设备） */
+        clearTarget() {
+            this.selectedTargetPos = null;
+        },
+
         /** 清空选中状态 */
         clearSelection() {
             this.selectedDeviceId = null;
