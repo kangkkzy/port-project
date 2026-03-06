@@ -680,6 +680,11 @@ const handleSpeedChange = (val: number) => {
 
 // 处理画布点击事件
 const handleStageClick = (evt: any) => {
+  // 【核心修复】：如果点击的不是底图(Stage)本身，说明点到了设备上，直接退出，防止重置选中状态！
+  if (evt.target !== evt.target.getStage()) {
+    return;
+  }
+
   // 如果在拖拽过程中或刚结束拖拽，则不触发选择目标
   if (isDragging.value) {
     isDragging.value = false
@@ -758,52 +763,60 @@ const handleWheel = (evt: any) => {
 
 // 移动选中的设备到目标位置
 const handleMoveToTarget = async () => {
-  if (!simStore.selectedDeviceId || !simStore.selectedTargetPos) {
-    ElMessage.warning('请先选中设备并选择目标位置');
+  const deviceId = simStore.selectedDeviceId;
+  const targetPos = simStore.selectedTargetPos;
+
+  if (!deviceId) {
+    ElMessage.warning('发送失败：未获取到有效设备，请在画布上重新点击选中设备！');
+    return;
+  }
+  if (!targetPos) {
+    ElMessage.warning('发送失败：请先点击地图空白处设置目标坐标(红色准星)！');
     return;
   }
 
   const device = simStore.selectedDevice;
-  const target = simStore.selectedTargetPos;
 
   try {
     if (device.type === 'ELECTRIC_TRUCK' || device.type === 'INTERNAL_TRUCK') {
       // 调用卡车移动接口
       await moveTruck({
-        deviceId: simStore.selectedDeviceId,
-        destinationX: target.x,
-        destinationY: target.y
+        deviceId: deviceId,
+        destinationX: targetPos.x,
+        destinationY: targetPos.y
       });
       // 记录下发指令的设备位置，用于显示连线
       simStore.pendingMoveCommand = {
         fromX: device.posX,
         fromY: device.posY,
-        toX: target.x,
-        toY: target.y
+        toX: targetPos.x,
+        toY: targetPos.y
       };
-      ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
+      ElMessage.success(`指令已发送至设备: ${deviceId}`);
+      simStore.clearTarget(); // 发送成功后清空准星
     } else if (device.type === 'QC' || device.type === 'CRANE_QC' || device.type === 'ASC' || device.type === 'CRANE_ASC') {
       // 调用起重机移动接口
       await moveCrane({
-        deviceId: simStore.selectedDeviceId,
-        destinationX: target.x,
-        destinationY: target.y
+        deviceId: deviceId,
+        destinationX: targetPos.x,
+        destinationY: targetPos.y
       });
       // 记录下发指令的设备位置，用于显示连线
       simStore.pendingMoveCommand = {
         fromX: device.posX,
         fromY: device.posY,
-        toX: target.x,
-        toY: target.y
+        toX: targetPos.x,
+        toY: targetPos.y
       };
-      ElMessage.success(`已发送移动指令: ${simStore.selectedDeviceId} -> (${target.x}, ${target.y})`);
+      ElMessage.success(`指令已发送至设备: ${deviceId}`);
+      simStore.clearTarget(); // 发送成功后清空准星
     } else {
       ElMessage.warning('不支持的设备类型');
       return;
     }
-    // 不立即清空目标位置，等待 WebSocket 推送更新后自动清除
   } catch (e: any) {
-    ElMessage.error('发送移动指令失败: ' + e.message);
+    ElMessage.error('发送移动指令失败，请查看控制台或后端日志');
+    console.error('移动指令错误:', e);
   }
 }
 
@@ -901,13 +914,6 @@ const handleReset = async () => {
   overflow: hidden;
 }
 
-/* 地图容器（保留用于 Konva） */
-.map-container {
-  width: 100%;
-  height: 100%;
-  background: #f5f5f5;
-}
-
 /* 控制面板样式 - 固定在右侧 */
 .control-panel {
   width: 350px;
@@ -996,16 +1002,11 @@ const handleReset = async () => {
 
 /* 控制面板样式 */
 .control-panel {
-  position: absolute;
-  top: 20px;
-  right: 20px;
   width: 350px;
-  max-height: 85vh;
+  background: #fff;
+  border-left: 1px solid #ddd;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 8px;
-  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
-  z-index: 100;
+  padding: 20px;
 }
 
 /* 没有选中设备时隐藏内容 */
@@ -1028,15 +1029,10 @@ const handleReset = async () => {
 
 /* 终端日志面板样式 */
 .terminal-panel {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  width: 400px;
-  max-height: 30vh;
+  height: 200px;
+  background: #1e1e1e;
   overflow-y: auto;
-  background: rgba(30, 30, 30, 0.85);
-  border-radius: 8px;
-  z-index: 100;
+  border-top: 1px solid #333;
 }
 
 .panel-header {
