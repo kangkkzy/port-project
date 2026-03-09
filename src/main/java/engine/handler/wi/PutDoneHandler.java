@@ -65,9 +65,15 @@ public class PutDoneHandler implements SimEventHandler {
             throw new BusinessException("设备 [" + deviceId + "] 不存在，PUT_DONE事件无法处理");
         }
 
-        device.setState(DeviceStateEnum.IDLE);
-
+        // === 任务5：无WI手动测试模式兼容降级 ===
         String wiRefNo = device.getCurrWiRefNo();
+        if (wiRefNo == null) {
+            log.warn("设备 [{}] 执行 PUT_DONE 事件，但无绑定作业指令(WI)。判定为手动测试模式，执行状态机降级释放。", deviceId);
+            device.setState(DeviceStateEnum.IDLE);
+            return;
+        }
+
+        device.setState(DeviceStateEnum.IDLE);
         if (wiRefNo == null) {
             log.error("严重错误: 事件[PUT_DONE]: 设备 [{}] 无作业指令，触发熔断暂停", deviceId);
             throw new BusinessException("设备 [" + deviceId + "] 无作业指令，PUT_DONE事件无法处理");

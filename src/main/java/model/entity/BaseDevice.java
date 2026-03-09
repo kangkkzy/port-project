@@ -47,6 +47,14 @@ public abstract class BaseDevice {
     // 剩余目标点列表（用于分段移动，经过每个节点）
     private List<Point> remainingMoveTargets = new ArrayList<>();
 
+    // === 运动意图字段：由指令处理器写入，由引擎 Tick 推演 ===
+    /** 目标 X 坐标（意图） */
+    protected Double targetX;
+    /** 目标 Y 坐标（意图） */
+    protected Double targetY;
+    /** 移动速度（米/秒），由指令指定 */
+    protected Double moveSpeed;
+
     @SuppressWarnings("unused")
     public BaseDevice(String id, DeviceTypeEnum type) {
         this.id = id;
@@ -143,6 +151,11 @@ public abstract class BaseDevice {
         this.lastStartPos = null;
         this.currentTargetPos = null;
         this.speed = null;
+
+        //  清理运动意图字段（由 CmdMoveHandler/CmdCraneMoveHandler 设置）
+        this.targetX = null;
+        this.targetY = null;
+        this.moveSpeed = null;
 
         //  停止并等待
         this.state = DeviceStateEnum.IDLE;

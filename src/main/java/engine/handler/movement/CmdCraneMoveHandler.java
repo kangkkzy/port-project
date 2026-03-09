@@ -164,10 +164,38 @@ public class CmdCraneMoveHandler implements SimEventHandler {
                     "脱轨异常: 起重机 [%s] 目标坐标 (%.1f, %.1f) 不在港口有效路网上！", craneId, targetX, targetY));
         }
 
+        // ── 运动意图字段：记录目标坐标，由引擎 Tick 推演 ──
+        device.setTargetX(targetX);
+        device.setTargetY(targetY);
+        device.setMoveSpeed(speed > 0 ? speed : 2.0);
+
+        // legacy 字段保留兼容
         device.setSpeed(speed);
         device.setCurrentTargetPos(targetPoint);
 
+        // ── 使用单轴距离计算移动耗时 ──
+        double travelDistance;
+        if (device instanceof QcDevice) {
+            travelDistance = Math.abs(targetX - posX);
+        } else if (device instanceof AscDevice) {
+            travelDistance = Math.abs(targetY - posY);
+        } else {
+            travelDistance = Math.abs(targetX - posX) + Math.abs(targetY - posY);
+        }
+        long durationMs = (long) ((travelDistance / speed) * 1000);
+
+        // 调度 MOVE_START 事件
         SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
         moveStart.addSubject("CRANE", craneId);
+
+        // 调度 ARRIVAL 事件
+        SimEvent arrivalEvent = engine.scheduleEvent(event.getEventId(),
+                context.getSimTime() + durationMs,
+                EventTypeEnum.ARRIVAL,
+                targetPoint);
+        arrivalEvent.addSubject("CRANE", craneId);
+
+        log.info("[CMD_CRANE_MOVE] 起重机 [{}] 移动: ({},{}) -> ({},{}), 距离: {:.1f}m, 预计耗时: {}ms",
+                craneId, posX, posY, targetX, targetY, travelDistance, durationMs);
     }
 }

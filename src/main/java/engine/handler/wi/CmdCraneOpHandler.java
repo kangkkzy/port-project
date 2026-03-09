@@ -63,6 +63,14 @@ public class CmdCraneOpHandler implements SimEventHandler {
                 throw new BusinessException(String.format(
                         "协同作业异常：[%s] 不是集卡，类型为 %s", targetTruckId, truck.getType()));
             }
+
+            // ── 强制安全锁：集卡必须处于 IDLE 静止状态 ──
+            if (truck.getState() != DeviceStateEnum.IDLE) {
+                throw new BusinessException(String.format(
+                        "安全违规：目标集卡 [%s] 状态为 %s。必须等待集卡完全停稳到达目标点后，起重机才能执行抓放作业！",
+                        targetTruckId, truck.getState()));
+            }
+
             double distance = Math.hypot(
                     crane.getPosX() - truck.getPosX(),
                     crane.getPosY() - truck.getPosY());
@@ -82,4 +90,3 @@ public class CmdCraneOpHandler implements SimEventHandler {
         opEvent.addSubject("CRANE", craneId);
     }
 }
-
