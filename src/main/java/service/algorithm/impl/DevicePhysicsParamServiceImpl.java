@@ -30,7 +30,7 @@ public class DevicePhysicsParamServiceImpl implements DevicePhysicsParamService 
             throw new BusinessException("设备ID不能为空");
         }
 
-        // 纯粹的读取逻辑，不尝试调用外部接口
+        // 纯粹的读取逻辑 不尝试调用外部接口
         DevicePhysicsParam param = context.getDevicePhysicsParamMap().get(deviceId);
         if (param == null) {
             throw new BusinessException(String.format(
@@ -46,7 +46,7 @@ public class DevicePhysicsParamServiceImpl implements DevicePhysicsParamService 
             throw new BusinessException("设备ID列表不能为空");
         }
 
-        // 逐个获取，任一缺失则抛异常
+        // 逐个获取 任一缺失则抛异常
         Map<String, DevicePhysicsParam> result = new java.util.HashMap<>();
         for (String id : deviceIds) {
             result.put(id, getPhysicsParam(id));
@@ -56,15 +56,13 @@ public class DevicePhysicsParamServiceImpl implements DevicePhysicsParamService 
 
     @Override
     public void syncPhysicsParams(java.util.List<String> deviceIds) {
-        // 此方法已废弃，不再支持运行时同步
         // 外部系统必须在场景初始化时通过 /sim/scenario/init 接口注入所有参数
-        throw new BusinessException("syncPhysicsParams 已废弃，请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
+        throw new BusinessException(" 请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
     }
 
     @Override
     public void preloadAllParams(Collection<String> allDeviceIds) {
-        // 此方法已废弃，不再支持运行时预加载
         // 外部系统必须在场景初始化时通过 /sim/scenario/init 接口注入所有参数
-        throw new BusinessException("preloadAllParams 已废弃，请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
+        throw new BusinessException(" ，请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
     }
 }

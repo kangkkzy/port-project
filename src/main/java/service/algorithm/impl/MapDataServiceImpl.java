@@ -128,18 +128,14 @@ public class MapDataServiceImpl implements MapDataService {
             return false;
         }
 
-        // 获取对应的容差值
-        double tolerance = 5.0;
-        try {
-            if ("TRUCK_ROAD".equals(targetPathType)) {
-                tolerance = getParameter("truckRoadTolerance");
-            } else if ("QC_RAIL".equals(targetPathType)) {
-                tolerance = getParameter("qcRailTolerance");
-            } else if ("ASC_RAIL".equals(targetPathType)) {
-                tolerance = getParameter("ascRailTolerance");
-            }
-        } catch (Exception e) {
-            // 使用默认值
+        // 获取对应的容差值（无配置即报错）
+        double tolerance;
+        if ("TRUCK_ROAD".equals(targetPathType)) {
+            tolerance = getParameter("truckRoadTolerance");
+        } else if ("QC_RAIL".equals(targetPathType)) {
+            tolerance = getParameter("qcRailTolerance");
+        } else {
+            tolerance = getParameter("ascRailTolerance");
         }
 
         for (MapPathDto path : pathList) {
@@ -162,92 +158,6 @@ public class MapDataServiceImpl implements MapDataService {
         }
 
         return false;
-    }
-
-    @Override
-    public List<Double> getKeyPointsBetween(String deviceType, double startX, double startY, double endX, double endY) {
-        // 设备类型映射
-        String targetPathType;
-        if ("QC".equalsIgnoreCase(deviceType) || "CRANE_QC".equalsIgnoreCase(deviceType)) {
-            targetPathType = "QC_RAIL";
-        } else if ("ASC".equalsIgnoreCase(deviceType) || "CRANE_ASC".equalsIgnoreCase(deviceType)) {
-            targetPathType = "ASC_RAIL";
-        } else if ("ELECTRIC_TRUCK".equalsIgnoreCase(deviceType) || "INTERNAL_TRUCK".equalsIgnoreCase(deviceType) || "TRUCK".equalsIgnoreCase(deviceType)) {
-            targetPathType = "TRUCK_ROAD";
-        } else {
-            return new ArrayList<>();
-        }
-
-        // 找到起点和终点所在的路径
-        MapPathDto startPath = null;
-        MapPathDto endPath = null;
-
-        for (MapPathDto path : pathList) {
-            if (!path.getPathType().equals(targetPathType)) {
-                continue;
-            }
-
-            // 检查起点是否在路径上
-            if ("HORIZONTAL".equals(path.getDirection())) {
-                if (Math.abs(startY - path.getPosition()) < 5 && startX >= path.getStartPoint() && startX <= path.getEndPoint()) {
-                    startPath = path;
-                }
-                if (Math.abs(endY - path.getPosition()) < 5 && endX >= path.getStartPoint() && endX <= path.getEndPoint()) {
-                    endPath = path;
-                }
-            } else if ("VERTICAL".equals(path.getDirection())) {
-                if (Math.abs(startX - path.getPosition()) < 5 && startY >= path.getStartPoint() && startY <= path.getEndPoint()) {
-                    startPath = path;
-                }
-                if (Math.abs(endX - path.getPosition()) < 5 && endY >= path.getStartPoint() && endY <= path.getEndPoint()) {
-                    endPath = path;
-                }
-            }
-        }
-
-        // 如果起点和终点在同一条路径上，提取该路径的关键点
-        if (startPath != null && startPath == endPath && startPath.getKeyPoints() != null) {
-            List<Double> keyPoints = new ArrayList<>();
-            List<Double> allKeyPoints = startPath.getKeyPoints();
-
-            // 确定移动方向
-            boolean movingForward;
-            boolean isHorizontal = "HORIZONTAL".equals(startPath.getDirection());
-            if (isHorizontal) {
-                movingForward = endX > startX;
-            } else {
-                movingForward = endY > startY;
-            }
-
-            // 筛选在起点和终点之间的关键点
-            for (Double keyPoint : allKeyPoints) {
-                if (isHorizontal) {
-                    if (movingForward) {
-                        if (keyPoint > startX && keyPoint <= endX) {
-                            keyPoints.add(keyPoint);
-                        }
-                    } else {
-                        if (keyPoint < startX && keyPoint >= endX) {
-                            keyPoints.add(keyPoint);
-                        }
-                    }
-                } else {
-                    if (movingForward) {
-                        if (keyPoint > startY && keyPoint <= endY) {
-                            keyPoints.add(keyPoint);
-                        }
-                    } else {
-                        if (keyPoint < startY && keyPoint >= endY) {
-                            keyPoints.add(keyPoint);
-                        }
-                    }
-                }
-            }
-
-            return keyPoints;
-        }
-
-        return new ArrayList<>();
     }
 
     /**
@@ -281,16 +191,14 @@ public class MapDataServiceImpl implements MapDataService {
     }
 
     /**
-     * 获取设备类型的合法作业跨度
-     * QC: 轨道位置 140，集卡道路 200，跨度 60 米
-     * ASC: 轨道位置 varies，集卡道路 200，跨度 varies
+     * 获取设备类型的合法作业跨度（无配置即报错）
      */
     @Override
     public double getOperationSpan(String deviceType, double truckY) {
         if ("QC".equalsIgnoreCase(deviceType) || "CRANE_QC".equalsIgnoreCase(deviceType)) {
-            return Math.abs(140.0 - truckY);
+            return getParameter("qcOperationSpan");
         } else if ("ASC".equalsIgnoreCase(deviceType) || "CRANE_ASC".equalsIgnoreCase(deviceType)) {
-            return 200.0;
+            return getParameter("ascOperationSpan");
         }
         return 0.0;
     }
@@ -334,13 +242,8 @@ public class MapDataServiceImpl implements MapDataService {
             }
         }
 
-        // 如果距离最近的轨道仍然超过容差，认为当前不在任何ASC轨道上
-        double tolerance;
-        try {
-            tolerance = getParameter("ascRailTolerance");
-        } catch (Exception e) {
-            tolerance = 3.0;
-        }
+        // 如果距离最近的轨道仍然超过容差，认为当前不在任何ASC轨道上（无配置即报错）
+        double tolerance = getParameter("ascRailTolerance");
         if (minDistance > tolerance) {
             return null;
         }
@@ -394,12 +297,8 @@ public class MapDataServiceImpl implements MapDataService {
 
     @Override
     public boolean isTransferZoneValid(String zoneType, double craneX, double craneY, double truckX, double truckY) {
-        double tolerance = 0.0;
-        try {
-            tolerance = getParameter("transferZoneTolerance");
-        } catch (Exception e) {
-            tolerance = 5.0;
-        }
+        // 无配置即报错
+        double tolerance = getParameter("transferZoneTolerance");
 
         for (TransferZoneDto zone : transferZoneList) {
             boolean isQcZone = zone.getZoneId().startsWith("QC_TRANSFER");

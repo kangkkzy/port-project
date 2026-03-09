@@ -89,15 +89,14 @@ public class CmdMoveHandler implements SimEventHandler {
 
         List<Point> remainingTargets = new ArrayList<>();
 
-        // === 严格模式：外部算法必须提供完整的行驶轨迹点列表 ===
-        // 引擎不再自动计算关键点（删除 getKeyPointsBetween 调用）
+        // 外部算法必须提供完整的行驶轨迹点列表
         if (payload.getPathPoints() == null || payload.getPathPoints().isEmpty()) {
             throw new BusinessException("外部算法必须提供完整的行驶轨迹点 (pathPoints)，引擎不再自动计算路径");
         }
 
         List<Point> externalPath = payload.getPathPoints();
 
-        // 校验路径合法性（如果启用）
+        // 校验路径合法性
         if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {
             String deviceType = device.getType().name();
             TrajectoryValidationResult validation = mapDataService.validateTrajectory(deviceType, externalPath);
@@ -122,7 +121,7 @@ public class CmdMoveHandler implements SimEventHandler {
         // 将剩余目标列表存入设备（用于分段移动）
         device.setRemainingMoveTargets(remainingTargets);
 
-        // === 运动意图字段：记录目标坐标 ===
+        // 记录目标坐标
         device.setTargetX(endX);
         device.setTargetY(endY);
         device.setMoveSpeed(speed);
@@ -130,13 +129,12 @@ public class CmdMoveHandler implements SimEventHandler {
 
         // 设置第一段的速度和目标
         device.setSpeed(speed);
-        // 使用 targetX/targetY 字段代替 setCurrentTargetPos
         if (remainingTargets.get(0) != null) {
             device.setTargetX(remainingTargets.get(0).getX());
             device.setTargetY(remainingTargets.get(0).getY());
         }
 
-        // === 纯离散事件调度：计算耗时并立即调度 ARRIVAL 事件 ===
+        // 计算耗时并立即调度 ARRIVAL 事件 ===
         // 取出第一个目标点（从索引1开始，因为索引0是当前位置）
         Point firstTarget = remainingTargets.get(1);
 
@@ -146,7 +144,7 @@ public class CmdMoveHandler implements SimEventHandler {
                         Math.pow(firstTarget.getY() - startY, 2)
         );
 
-        // 计算耗时（毫秒），处理 speed 为 0 的除零风险
+        // 计算耗时（毫秒） 处理 speed 为 0 的除零风险
         long duration;
         if (speed <= 0 || distance <= 0) {
             duration = 0;
@@ -158,7 +156,7 @@ public class CmdMoveHandler implements SimEventHandler {
         long currentSimTime = context.getSimTime();
         long arrivalTime = currentSimTime + duration;
 
-        // 设置虚拟状态插值字段，用于前端平滑动画
+        // 设置虚拟状态插值字段 用于前端平滑动画
         device.setMoveStartTime(currentSimTime);
         device.setMoveStartPosX(startX);
         device.setMoveStartPosY(startY);

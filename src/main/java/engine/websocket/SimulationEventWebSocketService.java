@@ -64,7 +64,6 @@ public class SimulationEventWebSocketService {
         payload.put("deviceId", deviceId);
         payload.put("simTime", event.getTriggerTime());
 
-        // 核心修复：从上下文中主动获取设备坐标，防止 event.getData() 为 null 时前端缺少位置信息
         // 使用插值坐标 getRealTimePosX/getRealTimePosY 保证动画平滑
         GlobalContext ctx = GlobalContext.getInstance();
         long currentSimTime = ctx.getSimTime();
@@ -82,7 +81,6 @@ public class SimulationEventWebSocketService {
                 }
             }
             if (targetPos == null) {
-                // 使用 BaseDevice 的 targetX/targetY 字段
                 if (device.getTargetX() != null && device.getTargetY() != null) {
                     targetPos = new model.entity.Point(device.getTargetX(), device.getTargetY());
                 }
@@ -197,7 +195,7 @@ public class SimulationEventWebSocketService {
             dto.setNeedCharge(truck.isNeedCharge());
         }
 
-        // ==================== 前端插值所需字段 ====================
+        //  前端插值所需字段
         // 直接映射原始字段，让前端自行计算插值
         dto.setMoveStartTime(device.getMoveStartTime());
         dto.setMoveStartPosX(device.getMoveStartPosX());

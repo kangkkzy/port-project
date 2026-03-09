@@ -144,13 +144,13 @@ public class SimStateController {
     private List<DeviceSnapshotDto> buildDeviceSnapshots(GlobalContext ctx) {
         List<DeviceSnapshotDto> allDevices = new ArrayList<>();
 
-        // 集卡 (Truck) - 修复：传入 ctx 参数
+        // 集卡 (Truck)
         allDevices.addAll(mapToSnapshot(ctx.getTruckMap().values(), ctx));
 
-        // 岸桥 (QC) - 修复：传入 ctx 参数
+        // 岸桥 (QC)
         allDevices.addAll(mapToSnapshot(ctx.getQcMap().values(), ctx));
 
-        // 龙门吊 (ASC) - 修复：传入 ctx 参数
+        // 龙门吊 (ASC)
         allDevices.addAll(mapToSnapshot(ctx.getAscMap().values(), ctx));
 
         return allDevices;
@@ -169,7 +169,7 @@ public class SimStateController {
             dto.setType(device.getType());
             dto.setState(device.getState());
 
-            // 移动中使用插值坐标（使用 getRealTimePosX/Y 方法）
+            // 移动中使用插值坐标
             if (DeviceStateEnum.MOVING.equals(device.getState())) {
                 dto.setPosX(device.getRealTimePosX(ctx.getSimTime()));
                 dto.setPosY(device.getRealTimePosY(ctx.getSimTime()));

@@ -53,7 +53,7 @@ public class SimulationEngine implements InitializingBean {
 
     private final GlobalContext context = GlobalContext.getInstance();
 
-    // -------------------- 数据结构 --------------------
+    // 数据结构
 
     /**
      * 事件优先队列，按仿真时间戳升序排列。
@@ -73,7 +73,7 @@ public class SimulationEngine implements InitializingBean {
      */
     private final Map<String, SimEvent> eventIdMap = new ConcurrentHashMap<>();
 
-    // -------------------- 状态控制标志 --------------------
+    //   状态控制标志
 
     /**
      * 引擎生命周期状态（单一权威来源）。
@@ -152,7 +152,7 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    // -------------------- 事件调度 --------------------
+    //  事件调度
 
     /**
      * 调度一个新事件，放入事件队列。
@@ -189,7 +189,7 @@ public class SimulationEngine implements InitializingBean {
         return true;
     }
 
-    // -------------------- 事件处理核心 --------------------
+    //  事件处理核心
 
     /**
      * 处理单个事件的核心逻辑。
@@ -257,7 +257,7 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    // -------------------- 全局熔断 --------------------
+    // 全局熔断
 
     /**
      * 触发全局熔断，记录错误上下文并锁死引擎。
@@ -303,7 +303,7 @@ public class SimulationEngine implements InitializingBean {
     private common.consts.BizTypeEnum getBizTypeFromEvent(SimEvent event) {
         if (event == null) return null;
 
-        // 1. 尝试从事件 payload 中获取 wiRefNo
+        //   尝试从事件 payload 中获取 wiRefNo
         if (event.getData() instanceof Map) {
             @SuppressWarnings("unchecked")
             Map<String, Object> payload = (Map<String, Object>) event.getData();
@@ -314,14 +314,14 @@ public class SimulationEngine implements InitializingBean {
             }
         }
 
-        // 2. 尝试从事件主体中获取 WI
+        //   尝试从事件主体中获取 WI
         String wiRefNoFromSubject = event.getPrimarySubject("WI");
         if (wiRefNoFromSubject != null) {
             WorkInstruction wi = context.getWorkInstructionMap().get(wiRefNoFromSubject);
             if (wi != null) return wi.getMoveKind();
         }
 
-        // 3. 尝试从关联设备反查当前作业指令
+        //   尝试从关联设备反查当前作业指令
         String deviceId = event.getPrimaryDeviceId();
         if (deviceId != null) {
             BaseDevice device = context.getDevice(deviceId);
@@ -331,7 +331,7 @@ public class SimulationEngine implements InitializingBean {
             }
         }
 
-        // 4. 递归父事件
+        //   递归父事件
         String parentEventId = event.getParentEventId();
         if (parentEventId != null) {
             SimEvent parentEvent = eventIdMap.get(parentEventId);
@@ -341,7 +341,7 @@ public class SimulationEngine implements InitializingBean {
         return null;
     }
 
-    // -------------------- 对外状态查询 --------------------
+    //   对外状态查询
 
     public java.util.Set<common.consts.BizTypeEnum> getSuspendedBizTypes() {
         return new java.util.HashSet<>(suspendedBizTypes);
@@ -363,7 +363,7 @@ public class SimulationEngine implements InitializingBean {
         return context.getSimTime();
     }
 
-    // -------------------- 后台自动运行 --------------------
+    //  后台自动运行
 
     /**
      * 启动后台异步事件循环。
@@ -411,7 +411,7 @@ public class SimulationEngine implements InitializingBean {
                 }
 
                 // ── 取出事件并将仿真时钟跃迁到事件触发时间 ──
-                // 仿真时间 simTime 直接由事件的 triggerTime 驱动，保证决定性和可重现性
+                // 仿真时间 simTime 直接由事件的 triggerTime 驱动 保证决定性和可重现性
                 long eventTriggerTime = nextEvent.getTriggerTime();
                 context.setSimTime(eventTriggerTime);
 
@@ -456,7 +456,6 @@ public class SimulationEngine implements InitializingBean {
      */
     @Deprecated
     private void scheduleSysSyncTick(long currentSimTime) {
-        // 已废弃：改为在事件处理循环中直接广播状态
     }
 
     /**
@@ -472,7 +471,7 @@ public class SimulationEngine implements InitializingBean {
         return nextEvent;
     }
 
-    // -------------------- 引擎重置 --------------------
+    //  引擎重置
 
     /**
      * 重置仿真引擎到初始状态。
@@ -491,7 +490,7 @@ public class SimulationEngine implements InitializingBean {
         log.info("仿真引擎已重置，系统恢复就绪。");
     }
 
-    // -------------------- 播放控制 --------------------
+    //  播放控制
 
     public void setPlaybackSpeed(double speed) {
         this.playbackSpeed = speed;
@@ -556,8 +555,7 @@ public class SimulationEngine implements InitializingBean {
         log.info("仿真引擎已暂停");
     }
 
-    // -------------------- 单步执行 --------------------
-
+    //  单步执行
     /**
      * 单步执行一个事件（供前端单步调试使用）。
      * 仅在引擎处于暂停状态且未全局熔断时有效。
@@ -602,7 +600,7 @@ public class SimulationEngine implements InitializingBean {
         }
     }
 
-    // -------------------- 连续运行 --------------------
+    //  连续运行
 
     /**
      * 连续运行引擎直到指定的仿真时间。
@@ -654,9 +652,6 @@ public class SimulationEngine implements InitializingBean {
                     sameTimeEventCount = 1;   // 重置为新时间戳的第一个事件
                 }
 
-                // 注意：在 HTTP 驱动模式下（前端调用 tick），这里不再 sleep。
-                // 前端已经通过 tick() 的间隔控制了视觉上的动画速度。
-                // 只有在后端自主运行模式（isRunning == true）时才需要 syncToRealTime。
                 if (this.timeSyncEnabled && this.isRunning) {
                     syncToRealTime(nextEvent.getTriggerTime());
                 }

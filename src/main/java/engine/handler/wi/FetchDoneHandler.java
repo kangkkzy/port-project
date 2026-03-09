@@ -62,7 +62,6 @@ public class FetchDoneHandler implements SimEventHandler {
             throw new BusinessException("设备 [" + deviceId + "] 不存在，FETCH_DONE事件无法处理");
         }
 
-        // === 任务5：无WI手动测试模式兼容降级 ===
         String wiRefNo = device.getCurrWiRefNo();
         if (wiRefNo == null) {
             log.warn("设备 [{}] 执行 FETCH_DONE 事件，但无绑定作业指令(WI)。判定为手动测试模式，执行状态机降级释放。", deviceId);
@@ -88,7 +87,7 @@ public class FetchDoneHandler implements SimEventHandler {
         boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
         boolean allowedFetch = isFetchDevice;
 
-        // 特例：如果是放箱设备，且集卡已到位，也允许抓取（中转场景）
+        //  如果是放箱设备 且集卡已到位 也允许抓取（中转场景）
         if (!allowedFetch && isPutDevice && wi.getCarryCheId() != null && wi.getContainerId() != null) {
             Container c = context.getContainerMap().get(wi.getContainerId());
             if (c != null && wi.getCarryCheId().equals(c.getCurrentPos())) {
@@ -156,7 +155,7 @@ public class FetchDoneHandler implements SimEventHandler {
             if (container != null) {
                 String oldPos = container.getCurrentPos();
 
-                // 如果箱子原来在堆场，从堆场三维数组中移除
+                // 如果箱子原来在堆场 从堆场三维数组中移除
                 if (oldPos != null && oldPos.startsWith("YARD_")) {
                     removeContainerFromYard(context, oldPos, container);
                 }

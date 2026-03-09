@@ -44,7 +44,7 @@ public class CmdCraneOpHandler implements SimEventHandler {
         String craneId = req.getCraneId();
         BaseDevice crane = context.getDevice(craneId);
 
-        // ── 1. 执行者必须是起重机 ──
+        //  执行者必须是起重机
         if (crane == null) {
             throw new BusinessException(String.format("抓放作业异常：起重机 [%s] 不存在", craneId));
         }
@@ -54,12 +54,12 @@ public class CmdCraneOpHandler implements SimEventHandler {
                     craneId, crane.getType()));
         }
 
-        // ── 2. 起重机不得处于移动状态 ──
+        //  起重机不得处于移动状态
         if (crane.getState() == DeviceStateEnum.MOVING) {
             throw new BusinessException(String.format("逻辑错误：起重机 [%s] 正在移动中，无法执行抓/放箱！", craneId));
         }
 
-        // ── 3. 校验目标集卡并检查空间距离（双端在场校验）──
+        //  校验目标集卡并检查空间距离 必需都在作业区域
         String targetTruckId = req.getTargetTruckId();
         if (targetTruckId != null && !targetTruckId.isEmpty()) {
             BaseDevice truck = context.getDevice(targetTruckId);
@@ -72,14 +72,13 @@ public class CmdCraneOpHandler implements SimEventHandler {
                         "协同作业异常：[%s] 不是集卡，类型为 %s", targetTruckId, truck.getType()));
             }
 
-            // ── 强制安全锁：集卡必须处于 IDLE 静止状态 ──
+            //  集卡必须处于 IDLE 静止状态
             if (truck.getState() != DeviceStateEnum.IDLE) {
                 throw new BusinessException(String.format(
                         "安全违规：目标集卡 [%s] 状态为 %s，未停稳前严禁抓放箱！",
                         targetTruckId, truck.getState()));
             }
 
-            // 改用曼哈顿距离判断（更符合正交移动特征）
             double distance = Math.abs(crane.getPosX() - truck.getPosX()) + Math.abs(crane.getPosY() - truck.getPosY());
 
             // 从外部配置获取最大交接距离

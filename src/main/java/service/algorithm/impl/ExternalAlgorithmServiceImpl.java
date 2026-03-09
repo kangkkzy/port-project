@@ -99,12 +99,11 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
             throw new BusinessException("起重机移动指令错误: 必须明确指定速度 (speed)");
         }
 
-        // 距离可以為負值(向相反方向移動)，但不能為null
+        // 距离可以为负 但不能为空
         if (req.getDistance() == null) {
             throw new BusinessException("起重机移动指令错误: 必须明确指定距离 (distance)");
         }
 
-        // 使用 CraneMoveReq 对象作为 payload
         SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_CRANE_MOVE, req);
         event.addSubject("CRANE", req.getCraneId());
         return Result.success();

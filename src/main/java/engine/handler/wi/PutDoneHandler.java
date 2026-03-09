@@ -62,7 +62,6 @@ public class PutDoneHandler implements SimEventHandler {
             throw new BusinessException("设备 [" + deviceId + "] 不存在，PUT_DONE事件无法处理");
         }
 
-        // === 任务5：无WI手动测试模式兼容降级 ===
         String wiRefNo = device.getCurrWiRefNo();
         if (wiRefNo == null) {
             log.warn("设备 [{}] 执行 PUT_DONE 事件，但无绑定作业指令(WI)。判定为手动测试模式，执行状态机降级释放。", deviceId);
@@ -86,14 +85,14 @@ public class PutDoneHandler implements SimEventHandler {
         boolean isFetchDevice = wi.getFetchCheId() != null && device.getId().equals(wi.getFetchCheId());
         boolean isPutDevice = wi.getPutCheId() != null && device.getId().equals(wi.getPutCheId());
 
-        // 1. 终点放箱
+        //   终点放箱
         if (isPutDevice) {
             if (wi.getContainerId() != null) {
                 Container container = context.getContainerMap().get(wi.getContainerId());
                 if (container != null && wi.getToPos() != null) {
                     String oldPos = container.getCurrentPos();
 
-                    // 如果箱子原来在设备上（已抓取），需要处理
+                    // 如果箱子原来在设备上（已抓取） 需要处理
                     if (oldPos != null && oldPos.startsWith("YARD_")) {
                         // 箱子从另一个堆场位置移动
                         removeContainerFromYard(context, oldPos, container);
@@ -102,7 +101,7 @@ public class PutDoneHandler implements SimEventHandler {
                     // 放箱到目标位置
                     container.setCurrentPos(wi.getToPos());
 
-                    // 如果目标位置是堆场，放入堆场三维数组
+                    // 如果目标位置是堆场 放入堆场三维数组
                     if (wi.getToPos().startsWith("YARD_")) {
                         addContainerToYard(context, wi.getToPos(), container);
                     }
@@ -114,7 +113,7 @@ public class PutDoneHandler implements SimEventHandler {
             SimEvent completeEvent = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.WI_COMPLETE, null);
             completeEvent.addSubject("WI", device.getCurrWiRefNo());
 
-            // 2. 中转放箱 (放到集卡上) - 支持跨距作业
+            //  中转放箱 (放到集卡上)
         } else if (isFetchDevice && wi.getCarryCheId() != null) {
             BaseDevice truck = context.getDevice(wi.getCarryCheId());
 

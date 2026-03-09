@@ -62,8 +62,3 @@ public class ChargingStartHandler implements SimEventHandler {
         }
     }
 }
-
-
-
-
-

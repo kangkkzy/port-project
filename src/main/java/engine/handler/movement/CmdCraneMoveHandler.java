@@ -77,7 +77,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
 
         DeviceTypeEnum deviceType = device.getType();
 
-        // 从外部配置获取容差值，不允许使用默认值兜底
+        // 从外部配置获取容差值 不允许使用默认值兜底
         double tolerance;
         if (deviceType == DeviceTypeEnum.QC) {
             tolerance = mapDataService.getParameter("qcRailTolerance");
@@ -89,7 +89,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
 
         // 计算目标坐标
         if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
-            // 水平移动：仅允许 QC 在其红色轨道上水平移动
+            // 水平移动：仅允许 QC 在其轨道上水平移动
             if (deviceType == DeviceTypeEnum.ASC) {
                 throw new BusinessException(String.format("ASC [%s] 只能沿紫色轨道做垂直移动，禁止水平移动", craneId));
             }
@@ -97,7 +97,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             targetPoint = new Point(posX + distance, posY);
 
             if (deviceType == DeviceTypeEnum.QC) {
-                // QC 只能在 QC 轨道上水平移动，Y 坐标必须保持不变
+                // QC 只能在 QC 轨道上水平移动 Y 坐标必须保持不变
                 // 校验当前是否在轨道上（距离大于 EPSILON 才需要校验）
                 if (Math.abs(distance) > EPSILON) {
                     MapPathDto qcRail = mapDataService.getQcRail();
@@ -182,7 +182,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
                     "脱轨异常: 起重机 [%s] 目标坐标 (%.1f, %.1f) 不在港口有效路网上！", craneId, targetX, targetY));
         }
 
-        // ==================== 纯离散耗时计算 ====================
+        //   纯离散耗时计算
         double travelDistance;
         if (device instanceof QcDevice) {
             travelDistance = Math.abs(targetX - posX);
@@ -202,7 +202,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         long currentSimTime = context.getSimTime();
         long arrivalTime = currentSimTime + durationMs;
 
-        // ==================== 设置运动意图字段 ====================
+        //   设置运动字段
         device.setTargetX(targetX);
         device.setTargetY(targetY);
         device.setMoveSpeed(speed);
@@ -212,13 +212,13 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         // 清空剩余目标列表（起重机通常是单段直线移动）
         device.setRemainingMoveTargets(null);
 
-        // ==================== 设置虚拟插值字段（用于前端平滑动画）====================
+        // 设置虚拟插值字段（用于前端平滑动画）
         device.setMoveStartTime(currentSimTime);
         device.setMoveStartPosX(posX);
         device.setMoveStartPosY(posY);
         device.setExpectedArrivalTime(arrivalTime);
 
-        // ==================== 直接调度 ARRIVAL 事件（不再调度 MOVE_START）=============
+        //  直接调度 ARRIVAL 事件
         SimEvent arrivalEvent = engine.scheduleEvent(
                 event.getEventId(),
                 arrivalTime,
