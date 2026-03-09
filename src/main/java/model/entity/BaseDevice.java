@@ -44,6 +44,16 @@ public abstract class BaseDevice {
     private Point lastStartPos;       // 上次出发点
     private long lastMoveStartTime;   // 上次出发时间
 
+    // === 虚拟状态插值字段：用于前端平滑动画 ===
+    /** 当前移动段的起步时间（仿真时间） */
+    private long moveStartTime;
+    /** 当前移动段的起步X坐标 */
+    private Double moveStartPosX;
+    /** 当前移动段的起步Y坐标 */
+    private Double moveStartPosY;
+    /** 当前移动段的预计到达时间（仿真时间） */
+    private long expectedArrivalTime;
+
     // 剩余目标点列表（用于分段移动，经过每个节点）
     private List<Point> remainingMoveTargets = new ArrayList<>();
 
@@ -204,5 +214,66 @@ public abstract class BaseDevice {
             }
         }
         return defaultSpeed;
+    }
+
+    // ==================== 虚拟状态插值方法 ====================
+    // 用于前端平滑动画：在离散事件之间，通过线性插值计算实时坐标
+
+    /**
+     * 获取实时X坐标（线性插值）
+     *
+     * @param currentSimTime 当前仿真时间
+     * @return 插值后的实时X坐标
+     */
+    public double getRealTimePosX(long currentSimTime) {
+        // 如果当前状态不是 MOVING，或者没有移动段信息，直接返回真实坐标
+        if (state != DeviceStateEnum.MOVING || moveStartPosX == null || expectedArrivalTime <= moveStartTime) {
+            return posX != null ? posX : 0.0;
+        }
+
+        // 如果已经超过预计到达时间，返回目标坐标
+        if (currentSimTime >= expectedArrivalTime) {
+            return targetX != null ? targetX : posX;
+        }
+
+        // 如果在移动过程中，计算线性插值
+        if (currentSimTime > moveStartTime) {
+            double progress = (currentSimTime - moveStartTime) / (double)(expectedArrivalTime - moveStartTime);
+            // 限制 progress 在 [0, 1] 范围内
+            progress = Math.max(0.0, Math.min(1.0, progress));
+            return moveStartPosX + (targetX - moveStartPosX) * progress;
+        }
+
+        // 如果还未到达起步时间，返回起步坐标
+        return moveStartPosX;
+    }
+
+    /**
+     * 获取实时Y坐标（线性插值）
+     *
+     * @param currentSimTime 当前仿真时间
+     * @return 插值后的实时Y坐标
+     */
+    public double getRealTimePosY(long currentSimTime) {
+        // 如果当前状态不是 MOVING，或者没有移动段信息，直接返回真实坐标
+        if (state != DeviceStateEnum.MOVING || moveStartPosY == null || expectedArrivalTime <= moveStartTime) {
+            return posY != null ? posY : 0.0;
+        }
+
+        // 如果已经超过预计到达时间，返回目标坐标
+        if (currentSimTime >= expectedArrivalTime) {
+            return targetY != null ? targetY : posY;
+        }
+
+        // 如果在移动过程中，计算线性插值
+        if (currentSimTime > moveStartTime) {
+            double progress = (currentSimTime - moveStartTime) / (double)(expectedArrivalTime - moveStartTime);
+            // 限制 progress 在 [0, 1] 范围内
+            progress = Math.max(0.0, Math.min(1.0, progress));
+            return moveStartPosY + (targetY - moveStartPosY) * progress;
+        }
+
+        // 如果还未到达起步时间，返回起步坐标
+        return moveStartPosY;
     }
 }

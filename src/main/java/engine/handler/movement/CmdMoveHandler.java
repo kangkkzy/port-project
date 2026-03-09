@@ -28,9 +28,8 @@ import java.util.List;
  * - 外部算法负责"算路"并下发轨迹点
  * - 引擎负责验证路径合法性和执行移动
  *
- * 支持两种模式：
- * 1. 简化模式：只设置 targetPoint，引擎自动计算关键点（同路径）
- * 2. 精确模式：设置 pathPoints，引擎按序执行（跨路径）
+ * 严格模式：外部算法必须提供完整的 pathPoints 轨迹点列表，
+ * 引擎不再自动计算关键点（已删除 getKeyPointsBetween 调用）
  */
 @Component
 public class CmdMoveHandler implements SimEventHandler {
@@ -90,54 +89,40 @@ public class CmdMoveHandler implements SimEventHandler {
 
         List<Point> remainingTargets = new ArrayList<>();
 
-        // === 精确模式：外部算法已提供轨迹点列表 ===
-        if (payload.getPathPoints() != null && !payload.getPathPoints().isEmpty()) {
-            List<Point> externalPath = payload.getPathPoints();
+        // === 严格模式：外部算法必须提供完整的行驶轨迹点列表 ===
+        // 引擎不再自动计算关键点（删除 getKeyPointsBetween 调用）
+        if (payload.getPathPoints() == null || payload.getPathPoints().isEmpty()) {
+            throw new BusinessException("外部算法必须提供完整的行驶轨迹点 (pathPoints)，引擎不再自动计算路径");
+        }
 
-            // 校验路径合法性（如果启用）
-            if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {
-                String deviceType = device.getType().name();
-                TrajectoryValidationResult validation = mapDataService.validateTrajectory(deviceType, externalPath);
-                if (!validation.isValid()) {
-                    String errorMsg = String.format("移动轨迹不合法，脱离路网: %s。轨迹点: %s",
-                            validation.getErrorMessage(), externalPath);
-                    log.error(errorMsg);
-                    throw new BusinessException(errorMsg);
-                }
-            }
+        List<Point> externalPath = payload.getPathPoints();
 
-            // 使用外部提供的轨迹点（从起点开始拼接）
-            remainingTargets.add(new Point(startX, startY));
-            remainingTargets.addAll(externalPath);
-
-            // 确保最终目标在列表中
-            Point lastPoint = remainingTargets.get(remainingTargets.size() - 1);
-            if (lastPoint.getX() != endX || lastPoint.getY() != endY) {
-                remainingTargets.add(target);
+        // 校验路径合法性（如果启用）
+        if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {
+            String deviceType = device.getType().name();
+            TrajectoryValidationResult validation = mapDataService.validateTrajectory(deviceType, externalPath);
+            if (!validation.isValid()) {
+                String errorMsg = String.format("移动轨迹不合法，脱离路网: %s。轨迹点: %s",
+                        validation.getErrorMessage(), externalPath);
+                log.error(errorMsg);
+                throw new BusinessException(errorMsg);
             }
         }
-        // === 简化模式：引擎自动计算关键点 ===
-        else {
-            String deviceType = device.getType().name();
-            List<Double> keyPoints = mapDataService.getKeyPointsBetween(deviceType, startX, startY, endX, endY);
 
-            boolean isHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
+        // 使用外部提供的轨迹点（从起点开始拼接）
+        remainingTargets.add(new Point(startX, startY));
+        remainingTargets.addAll(externalPath);
 
-            for (Double keyPoint : keyPoints) {
-                if (isHorizontal) {
-                    remainingTargets.add(new Point(keyPoint, endY));
-                } else {
-                    remainingTargets.add(new Point(endX, keyPoint));
-                }
-            }
-            // 添加最终目标
+        // 确保最终目标在列表中
+        Point lastPoint = remainingTargets.get(remainingTargets.size() - 1);
+        if (lastPoint.getX() != endX || lastPoint.getY() != endY) {
             remainingTargets.add(target);
         }
 
         // 将剩余目标列表存入设备（用于分段移动）
         device.setRemainingMoveTargets(remainingTargets);
 
-        // === 运动意图字段：记录目标坐标，由引擎 Tick 推演 ===
+        // === 运动意图字段：记录目标坐标 ===
         device.setTargetX(endX);
         device.setTargetY(endY);
         device.setMoveSpeed(speed);
@@ -147,13 +132,48 @@ public class CmdMoveHandler implements SimEventHandler {
         device.setSpeed(speed);
         device.setCurrentTargetPos(remainingTargets.get(0));
 
-        // === 【核心修复】废除预估到达时间！ ===
-        // 移动意图已下发，完全交由物理引擎 Tick 进行逼真推演
-        // 当物理坐标真实触碰终点时，由 DevicePhysicsService 动态触发 REPORT_IDLE 事件
+        // === 纯离散事件调度：计算耗时并立即调度 ARRIVAL 事件 ===
+        // 取出第一个目标点（从索引1开始，因为索引0是当前位置）
+        Point firstTarget = remainingTargets.get(1);
 
-        log.info("[CMD_MOVE] 设备 [{}] 收到移动意图: ({}, {}) -> ({}, {}), 交由底层 Tick 引擎进行逼真寻路推演...",
+        // 计算当前位置到目标点的欧式距离
+        double distance = Math.sqrt(
+                Math.pow(firstTarget.getX() - startX, 2) +
+                        Math.pow(firstTarget.getY() - startY, 2)
+        );
+
+        // 计算耗时（毫秒），处理 speed 为 0 的除零风险
+        long duration;
+        if (speed <= 0 || distance <= 0) {
+            duration = 0;
+        } else {
+            duration = (long) ((distance / speed) * 1000);
+        }
+
+        // 计算预期到达时间
+        long currentSimTime = context.getSimTime();
+        long arrivalTime = currentSimTime + duration;
+
+        // 设置虚拟状态插值字段，用于前端平滑动画
+        device.setMoveStartTime(currentSimTime);
+        device.setMoveStartPosX(startX);
+        device.setMoveStartPosY(startY);
+        device.setExpectedArrivalTime(arrivalTime);
+
+        // 立即调度 ARRIVAL 事件
+        SimEvent arrivalEvent = engine.scheduleEvent(
+                event.getEventId(),
+                arrivalTime,
+                EventTypeEnum.ARRIVAL,
+                firstTarget
+        );
+        arrivalEvent.addSubject("TRUCK", truckId);
+
+        log.info("[CMD_MOVE] 设备 [{}] 调度 ARRIVAL 事件: ({}, {}) -> ({}, {}), " +
+                        "距离={}m, 速度={}m/s, 预计耗时={}ms, 到达时间={}",
                 truckId,
                 String.format("%.1f", startX), String.format("%.1f", startY),
-                String.format("%.1f", endX), String.format("%.1f", endY));
+                String.format("%.1f", firstTarget.getX()), String.format("%.1f", firstTarget.getY()),
+                String.format("%.1f", distance), speed, duration, arrivalTime);
     }
 }

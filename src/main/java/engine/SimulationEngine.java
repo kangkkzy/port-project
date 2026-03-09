@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 仿真引擎核心类
@@ -119,6 +120,12 @@ public class SimulationEngine implements InitializingBean {
      * 这样可彻底避免长 sleep 期间对新指令无响应的死锁风险。
      */
     private final Object engineLock = new Object();
+
+    /**
+     * 引擎并发锁，保护 step() 和内部执行逻辑。
+     * 杜绝多把锁导致的死锁。
+     */
+    private final ReentrantLock engineReentrantLock = new ReentrantLock();
 
     /**
      * 回放速度倍率。
@@ -392,22 +399,21 @@ public class SimulationEngine implements InitializingBean {
     /**
      * 后台事件循环（由 start() 通过 CompletableFuture 异步调用，禁止手动调用）。
      *
-     * 核心机制：微滴答实时时钟推进 + 锁唤醒
+     * 核心机制：纯离散事件驱动
      * ─────────────────────────────────────────────────────────
-     * 1. 每轮根据真实流逝时间 × timeScale 推进仿真时钟。
-     * 2. 若队首事件的触发时间已到，立即处理并广播快照。
-     * 3. 若时间未到或队列为空，调用 engineLock.wait(20) 微休眠；
-     *    scheduleEvent() 会在入队新事件时 notifyAll() 立刻唤醒，
-     *    彻底解决"长 sleep 期间新指令无响应"的死锁问题。
+     * 1. 每次从事件队列中取出最早的事件（按 triggerTime 排序）。
+     * 2. 将仿真时钟 simTime 直接跃迁到该事件的 triggerTime。
+     * 3. 处理事件后，如果需要向前端广播，直接调用 broadcastState。
+     * 4. 若队列为空，调用 engineLock.wait() 挂起等待新事件入队。
      * ─────────────────────────────────────────────────────────
      */
     private void runLoop() {
-        log.info("引擎后台循环已启动 (threadId={}, timeScale={}x)", Thread.currentThread().getId(), timeScale);
-        long lastRealTime = System.currentTimeMillis();
-        lastStateBroadcastTime = lastRealTime;
+        log.info("引擎后台循环已启动 (threadId={})", Thread.currentThread().getId());
+        long lastBroadcastSimTime = 0;  // 上次广播的仿真时间
 
         while (engineState == EngineState.RUNNING) {
             try {
+                // ── 尝试从队列中取出最早的事件 ──
                 SimEvent nextEvent = eventQueue.peek();
 
                 // ── 队列为空：挂起等待新事件入队（notifyAll 唤醒）──
@@ -415,50 +421,42 @@ public class SimulationEngine implements InitializingBean {
                     synchronized (engineLock) {
                         engineLock.wait(1000);
                     }
-                    lastRealTime = System.currentTimeMillis(); // 休眠期间真实时间已流逝，重置基准
-                    lastStateBroadcastTime = lastRealTime;
                     continue;
                 }
 
-                // ── 按真实时间流逝 × timeScale 推进仿真时钟 ──
-                long nowRealTime = System.currentTimeMillis();
-                long realDelta = nowRealTime - lastRealTime;
-                lastRealTime = nowRealTime;
-                long newSimTime = context.getSimTime() + (long)(realDelta * timeScale);
-                context.setSimTime(newSimTime);
+                // ── 取出事件并将仿真时钟跃迁到事件触发时间 ──
+                // 仿真时间 simTime 直接由事件的 triggerTime 驱动，保证决定性和可重现性
+                long eventTriggerTime = nextEvent.getTriggerTime();
+                context.setSimTime(eventTriggerTime);
 
-                // ── 物理推演 + 定时状态广播 ──
-                if (nowRealTime - lastStateBroadcastTime >= STATE_BROADCAST_INTERVAL_MS) {
-                    double deltaSec = (realDelta * timeScale) / 1000.0;
-                    // 推演物理坐标（将 this 传入以支持动态触发事件）
-                    if (devicePhysicsService != null) {
-                        devicePhysicsService.updateMovingDevices(context, this, deltaSec);
-                    }
-                    // 广播状态快照（包含实时坐标）
-                    if (webSocketService != null) {
-                        webSocketService.broadcastState(context);
-                    }
-                    lastStateBroadcastTime = nowRealTime;
-                }
-
-                // ── 仿真时钟到达事件触发时间，立即执行 ──
-                if (newSimTime >= nextEvent.getTriggerTime()) {
-                    SimEvent event = eventQueue.poll();
-                    if (event != null) {
-                        processEvent(event);
-                        // 广播事件给前端（broadcast 内部已按 BROADCAST_EVENTS 过滤非关键事件）
+                // ── 取出并处理事件 ──
+                SimEvent event = eventQueue.poll();
+                if (event != null) {
+                    // 跳过系统同步事件的常规处理（避免递归）
+                    if (event.getType() == EventTypeEnum.SYS_SYNC_TICK) {
+                        // 系统同步事件：只负责广播状态
                         if (webSocketService != null) {
-                            try {
-                                webSocketService.broadcast(event);
-                            } catch (Exception broadcastEx) {
-                                log.warn("事件广播失败（不影响仿真继续运行）: {}", broadcastEx.getMessage());
-                            }
+                            webSocketService.broadcastState(context);
+                        }
+                        lastBroadcastSimTime = eventTriggerTime;
+                        continue;
+                    }
+
+                    processEvent(event);
+                    // 广播事件给前端（broadcast 内部已按 BROADCAST_EVENTS 过滤非关键事件）
+                    if (webSocketService != null) {
+                        try {
+                            webSocketService.broadcast(event);
+                        } catch (Exception broadcastEx) {
+                            log.warn("事件广播失败（不影响仿真继续运行）: {}", broadcastEx.getMessage());
                         }
                     }
-                } else {
-                    // ── 时间未到：微休眠 20ms，同时等待被新指令唤醒 ──
-                    synchronized (engineLock) {
-                        engineLock.wait(20);
+
+                    // ── 状态快照广播 ──
+                    // 每隔 50ms 仿真时间广播一次状态
+                    if (webSocketService != null && (eventTriggerTime - lastBroadcastSimTime) >= STATE_BROADCAST_INTERVAL_MS) {
+                        webSocketService.broadcastState(context);
+                        lastBroadcastSimTime = eventTriggerTime;
                     }
                 }
 
@@ -474,6 +472,19 @@ public class SimulationEngine implements InitializingBean {
             }
         }
         log.info("引擎后台循环已退出，当前状态: {}", engineState);
+    }
+
+    /**
+     * 调度系统同步事件，用于向前端广播状态快照。
+     * 每隔 50ms 仿真时间调度一次自己。
+     * 注意：此方法已不再使用，改为在处理事件后直接广播。
+     *
+     * @param currentSimTime 当前仿真时间
+     * @deprecated 请使用在 runLoop 中直接调用 webSocketService.broadcastState
+     */
+    @Deprecated
+    private void scheduleSysSyncTick(long currentSimTime) {
+        // 已废弃：改为在事件处理循环中直接广播状态
     }
 
     /**
@@ -578,36 +589,45 @@ public class SimulationEngine implements InitializingBean {
     /**
      * 单步执行一个事件（供前端单步调试使用）。
      * 仅在引擎处于暂停状态且未全局熔断时有效。
+     * 使用 ReentrantLock 保护并发执行逻辑。
      *
      * @return 执行的事件，若无可执行事件则返回 null
      */
-    public synchronized SimEvent step() {
-        if (globalSuspended) {
-            log.warn("拒绝单步执行：引擎处于全局暂停状态。");
-            return null;
+    public SimEvent step() {
+        engineReentrantLock.lock();
+        try {
+            if (globalSuspended) {
+                log.warn("拒绝单步执行：引擎处于全局暂停状态。");
+                return null;
+            }
+
+            if (isRunning) {
+                log.warn("拒绝单步执行：引擎正在自动运行中。");
+                return null;
+            }
+
+            // 确保处于暂停状态
+            this.isPaused = true;
+
+            if (eventQueue.isEmpty()) {
+                log.info("事件队列为空，无法单步执行");
+                return null;
+            }
+
+            SimEvent nextEvent = eventQueue.poll();
+            if (nextEvent == null) {
+                return null;
+            }
+
+            // 推进仿真时钟到事件触发时间
+            context.setSimTime(nextEvent.getTriggerTime());
+
+            log.info("单步执行事件: {} at time {}", nextEvent.getEventId(), nextEvent.getTriggerTime());
+            processEvent(nextEvent);
+            return nextEvent;
+        } finally {
+            engineReentrantLock.unlock();
         }
-
-        if (isRunning) {
-            log.warn("拒绝单步执行：引擎正在自动运行中。");
-            return null;
-        }
-
-        // 确保处于暂停状态
-        this.isPaused = true;
-
-        if (eventQueue.isEmpty()) {
-            log.info("事件队列为空，无法单步执行");
-            return null;
-        }
-
-        SimEvent nextEvent = eventQueue.poll();
-        if (nextEvent == null) {
-            return null;
-        }
-
-        log.info("单步执行事件: {} at time {}", nextEvent.getEventId(), nextEvent.getTriggerTime());
-        processEvent(nextEvent);
-        return nextEvent;
     }
 
     // -------------------- 连续运行 --------------------
@@ -616,64 +636,71 @@ public class SimulationEngine implements InitializingBean {
      * 连续运行引擎直到指定的仿真时间。
      * <p>
      * 从事件队列中依次取出触发时间 ≤ targetSimTime 的事件并处理。
+     * 仿真时间 simTime 由弹出的事件的 triggerTime 驱动，保证决定性和可重现性。
      * 包含死循环检测：同一时间戳连续处理事件数超过配置阈值时抛出异常并熔断。
+     * 使用 ReentrantLock 保护并发执行逻辑。
      *
      * @param targetSimTime 目标仿真时间（毫秒）
      * @throws SimulationDeadLoopException 当检测到死循环时抛出
      */
-    public synchronized void runUntil(long targetSimTime) {
-        int sameTimeEventCount = 0;          // 同一时间戳连续处理的事件计数
-        long lastProcessedTime = -1L;        // 上一个处理的事件时间戳
-        int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp(); // 阈值
-        long currentTime = context.getSimTime();
+    public void runUntil(long targetSimTime) {
+        engineReentrantLock.lock();
+        try {
+            int sameTimeEventCount = 0;          // 同一时间戳连续处理的事件计数
+            long lastProcessedTime = -1L;        // 上一个处理的事件时间戳
+            int maxEventsPerTimestamp = physicsConfig.getMaxEventsPerTimestamp(); // 阈值
+            long currentTime = context.getSimTime();
 
-        while (!eventQueue.isEmpty()) {
-            if (globalSuspended) {
-                log.warn("runUntil 中止：引擎已暂停");
-                break;
-            }
-
-            SimEvent nextEvent = eventQueue.peek();
-            if (nextEvent.getTriggerTime() > targetSimTime) {
-                // 已推进到目标时间之后，更新时钟并退出
-                if (!globalSuspended && targetSimTime > currentTime) {
-                    context.setSimTime(targetSimTime);
+            while (!eventQueue.isEmpty()) {
+                if (globalSuspended) {
+                    log.warn("runUntil 中止：引擎已暂停");
+                    break;
                 }
-                break;
-            }
 
-            // 死循环检测：同一时间戳连续处理过多事件
-            if (nextEvent.getTriggerTime() == lastProcessedTime) {
-                sameTimeEventCount++;
-                if (sameTimeEventCount > maxEventsPerTimestamp) {
-                    String errorMsg = String.format("检测到仿真死循环: 时间戳 %d 堆积超过 %d 个零耗时事件",
-                            lastProcessedTime, maxEventsPerTimestamp);
-
-                    errorLog.recordDeadLoop(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp);
-                    triggerGlobalSuspend(nextEvent);
-                    throw new SimulationDeadLoopException(errorMsg, lastProcessedTime, sameTimeEventCount);
+                SimEvent nextEvent = eventQueue.peek();
+                if (nextEvent.getTriggerTime() > targetSimTime) {
+                    // 已推进到目标时间之后，更新时钟并退出
+                    if (!globalSuspended && targetSimTime > currentTime) {
+                        context.setSimTime(targetSimTime);
+                    }
+                    break;
                 }
-            } else {
-                lastProcessedTime = nextEvent.getTriggerTime();
-                sameTimeEventCount = 1;   // 重置为新时间戳的第一个事件
+
+                // 死循环检测：同一时间戳连续处理过多事件
+                if (nextEvent.getTriggerTime() == lastProcessedTime) {
+                    sameTimeEventCount++;
+                    if (sameTimeEventCount > maxEventsPerTimestamp) {
+                        String errorMsg = String.format("检测到仿真死循环: 时间戳 %d 堆积超过 %d 个零耗时事件",
+                                lastProcessedTime, maxEventsPerTimestamp);
+
+                        errorLog.recordDeadLoop(lastProcessedTime, sameTimeEventCount, maxEventsPerTimestamp);
+                        triggerGlobalSuspend(nextEvent);
+                        throw new SimulationDeadLoopException(errorMsg, lastProcessedTime, sameTimeEventCount);
+                    }
+                } else {
+                    lastProcessedTime = nextEvent.getTriggerTime();
+                    sameTimeEventCount = 1;   // 重置为新时间戳的第一个事件
+                }
+
+                // 注意：在 HTTP 驱动模式下（前端调用 tick），这里不再 sleep。
+                // 前端已经通过 tick() 的间隔控制了视觉上的动画速度。
+                // 只有在后端自主运行模式（isRunning == true）时才需要 syncToRealTime。
+                if (this.timeSyncEnabled && this.isRunning) {
+                    syncToRealTime(nextEvent.getTriggerTime());
+                }
+
+                // 取出并处理事件（processEvent 内部会推进仿真时钟到事件触发时间）
+                eventQueue.poll();
+                processEvent(nextEvent);
+                currentTime = context.getSimTime();
             }
 
-            // 注意：在 HTTP 驱动模式下（前端调用 tick），这里不再 sleep。
-            // 前端已经通过 tick() 的间隔控制了视觉上的动画速度。
-            // 只有在后端自主运行模式（isRunning == true）时才需要 syncToRealTime。
-            if (this.timeSyncEnabled && this.isRunning) {
-                syncToRealTime(nextEvent.getTriggerTime());
+            // 如果队列为空但目标时间大于当前时间，直接推进时钟（空闲推进）
+            if (!globalSuspended && eventQueue.isEmpty() && targetSimTime > currentTime) {
+                context.setSimTime(targetSimTime);
             }
-
-            // 取出并处理事件
-            eventQueue.poll();
-            processEvent(nextEvent);
-            currentTime = context.getSimTime();
-        }
-
-        // 如果队列为空但目标时间大于当前时间，直接推进时钟（空闲推进）
-        if (!globalSuspended && eventQueue.isEmpty() && targetSimTime > currentTime) {
-            context.setSimTime(targetSimTime);
+        } finally {
+            engineReentrantLock.unlock();
         }
     }
 

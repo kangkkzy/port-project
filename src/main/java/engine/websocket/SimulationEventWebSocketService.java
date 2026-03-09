@@ -62,11 +62,13 @@ public class SimulationEventWebSocketService {
         payload.put("simTime", event.getTriggerTime());
 
         // 核心修复：从上下文中主动获取设备坐标，防止 event.getData() 为 null 时前端缺少位置信息
+        // 使用插值坐标 getRealTimePosX/getRealTimePosY 保证动画平滑
         GlobalContext ctx = GlobalContext.getInstance();
+        long currentSimTime = ctx.getSimTime();
         BaseDevice device = ctx.getDevice(deviceId);
         if (device != null) {
-            payload.put("currentPosX", device.getPosX());
-            payload.put("currentPosY", device.getPosY());
+            payload.put("currentPosX", device.getRealTimePosX(currentSimTime));
+            payload.put("currentPosY", device.getRealTimePosY(currentSimTime));
 
             // 推送终点坐标（前端 lerp 动画的目标）：优先用集卡的剩余路径首点，其次用 currentTargetPos
             model.entity.Point targetPos = null;
@@ -118,6 +120,54 @@ public class SimulationEventWebSocketService {
             log.info("已推送业务告警事件到前端 -> {}: {}", deviceId, errorMessage);
         } catch (Exception e) {
             log.warn("广播异常事件失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 广播状态快照（包含所有设备的实时坐标，用于前端动画插值）
+     * 使用 getRealTimePosX/getRealTimePosY 获取插值后的坐标，保证动画平滑
+     *
+     * @param context 全局上下文
+     */
+    public void broadcastState(GlobalContext context) {
+        if (context == null) return;
+
+        long currentSimTime = context.getSimTime();
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "STATE_SNAPSHOT");
+        payload.put("simTime", currentSimTime);
+
+        // 收集所有设备的插值坐标
+        Map<String, Map<String, Double>> devicePositions = new HashMap<>();
+
+        // 收集集卡坐标
+        for (Truck truck : context.getTruckMap().values()) {
+            Map<String, Double> pos = new HashMap<>();
+            pos.put("x", truck.getRealTimePosX(currentSimTime));
+            pos.put("y", truck.getRealTimePosY(currentSimTime));
+            devicePositions.put(truck.getId(), pos);
+        }
+
+        // 收集起重机坐标
+        for (BaseDevice crane : context.getQcMap().values()) {
+            Map<String, Double> pos = new HashMap<>();
+            pos.put("x", crane.getRealTimePosX(currentSimTime));
+            pos.put("y", crane.getRealTimePosY(currentSimTime));
+            devicePositions.put(crane.getId(), pos);
+        }
+        for (BaseDevice crane : context.getAscMap().values()) {
+            Map<String, Double> pos = new HashMap<>();
+            pos.put("x", crane.getRealTimePosX(currentSimTime));
+            pos.put("y", crane.getRealTimePosY(currentSimTime));
+            devicePositions.put(crane.getId(), pos);
+        }
+
+        payload.put("devicePositions", devicePositions);
+
+        try {
+            messagingTemplate.convertAndSend("/topic/sim-state", payload);
+        } catch (Exception e) {
+            log.warn("广播状态快照失败: {}", e.getMessage());
         }
     }
 }

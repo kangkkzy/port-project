@@ -37,5 +37,8 @@ public enum EventTypeEnum {
     WI_COMPLETE,    // 作业指令完成
 
     // 业务异常事件
-    SIM_ERROR_EVENT // 业务约束拦截错误事件，推送到前端可视化告警
+    SIM_ERROR_EVENT, // 业务约束拦截错误事件，推送到前端可视化告警
+
+    // 系统内部事件
+    SYS_SYNC_TICK   // 系统同步事件，用于向前端广播状态快照
 }
