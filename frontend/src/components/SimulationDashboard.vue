@@ -88,8 +88,8 @@
                    @dragstart="handleStageDragStart"
                    @dragend="handleStageDragEnd"
                    @wheel="handleWheel">
-            <!-- 背景层：渲染地图（海侧、堆场、充电站） -->
-            <v-layer name="background">
+            <!-- 背景层：渲染地图（海侧、堆场、充电站）- 静态层，关闭事件监听以提升性能 -->
+            <v-layer name="background" :config="{ listening: false }">
               <!-- 海侧区域：name: 'map-bg' 供全局事件委托拾取 -->
               <v-rect :config="{ x: 0, y: 0, width: stageConfig.width, height: MAP_UI.seaSideHeight, fill: '#bbdefb', name: 'map-bg' }" />
               <v-text :config="{ x: 20, y: MAP_UI.seaSideY, text: '海侧区域', fontSize: MAP_UI.seaSideFontSize, fill: '#1565c0', opacity: 0.5 }" />
@@ -168,7 +168,7 @@
               </template>
             </v-layer>
 
-            <v-layer name="rails">
+            <v-layer name="rails" :config="{ listening: false }">
               <!-- 动态渲染地图路径（轨道/道路） -->
               <template v-for="(path, idx) in simStore.mapPaths" :key="'path-'+idx">
                 <v-line :config="{
@@ -521,8 +521,9 @@ const formatSubjects = (subjects: any) => {
 }
 
 /**
- * 动画循环：平滑地将设备位置从当前位置移动到目标位置，并处理闪烁告警。
- * 每帧更新 displayDevices 中的坐标，实现缓动效果。
+ * 动画循环：基于本地视觉仿真时间进行 Lerp 插值
+ * 每帧更新 displayDevices 中的坐标，实现平滑动画
+ * 即使后端 10 秒钟不发消息，前端车辆依然能平滑跑到终点
  */
 const animateLoop = (timestamp?: number) => {
   // 计算 Delta Time 用于平滑动画
@@ -530,36 +531,64 @@ const animateLoop = (timestamp?: number) => {
   const deltaTime = lastFrameTime.value ? (now - lastFrameTime.value) : 16;
   lastFrameTime.value = now;
 
-  // 计算基于 Delta Time 的插值因子 (假设 60fps 为基准)
-  const lerpFactor = Math.min(deltaTime / 16.67, 2.0); // 限制最大插值防止跳跃
+  // 推进视觉仿真时间（基于真实流逝时间）
+  // 假设 playbackSpeed = 1.0 时，1ms 真实时间 = 1ms 仿真时间
+  // 根据后端 timeScale 和前端 playbackSpeed 调整
+  const simDeltaMs = deltaTime * simStore.playbackSpeed;
+  simStore.visualSimTime += simDeltaMs;
 
+  // 遍历所有设备，使用 Lerp 插值计算实时坐标
   simStore.devices.forEach(target => {
     // 【核心修复】：后端 DTO 字段名为 deviceId，兼容 id 作为降级
     const actualId = target.deviceId || target.id;
     if (!actualId) return;
 
+    // 获取或创建设备显示状态
     if (!displayDevices.value[actualId]) {
       // 首次出现，直接拷贝，注入统一的 id 字段供模板显示
       displayDevices.value[actualId] = { ...target, id: actualId, zProgress: 0 };
     } else {
       const curr = displayDevices.value[actualId];
-      const dx = target.posX - curr.posX;
-      const dy = target.posY - curr.posY;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+
+      // 如果设备处于 MOVING 状态且有插值字段，使用 Lerp 计算实时坐标
+      if (target.state === 'MOVING' &&
+          target.moveStartTime != null &&
+          target.expectedArrivalTime != null &&
+          target.moveStartTime < target.expectedArrivalTime) {
+
+        const moveStartTime = target.moveStartTime;
+        const expectedArrivalTime = target.expectedArrivalTime;
+        const visualSimTime = simStore.visualSimTime;
+
+        // 计算进度 progress (0 ~ 1)
+        let progress = (visualSimTime - moveStartTime) / (expectedArrivalTime - moveStartTime);
+        progress = Math.max(0, Math.min(1, progress));
+
+        // Lerp 插值计算实时坐标
+        const moveStartPosX = target.moveStartPosX ?? target.posX;
+        const moveStartPosY = target.moveStartPosY ?? target.posY;
+        const targetX = target.targetX ?? target.posX;
+        const targetY = target.targetY ?? target.posY;
+
+        curr.posX = moveStartPosX + (targetX - moveStartPosX) * progress;
+        curr.posY = moveStartPosY + (targetY - moveStartPosY) * progress;
+      } else {
+        // 非 MOVING 状态或无插值字段，直接使用后端坐标
         curr.posX = target.posX;
         curr.posY = target.posY;
-      } else {
-        curr.posX += dx * lerpFactor * 0.15;
-        curr.posY += dy * lerpFactor * 0.15;
       }
+
+      // 更新其他状态
       curr.state = target.state;
       curr.type = target.type;
 
+      // 告警闪烁逻辑
       const alertExpiry = simStore.deviceAlerts.get(actualId);
       curr.isAlerting = alertExpiry && now < alertExpiry && (Math.floor(now / 250) % 2 === 0);
       curr.simTime = simStore.simTime;
     }
   });
+
   simStore.animateTick();
   animFrameId = requestAnimationFrame(animateLoop);
 };

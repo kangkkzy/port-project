@@ -21,7 +21,13 @@ import service.algorithm.MapDataService;
 import model.dto.config.MapPathDto;
 
 /**
- * 吊具移动指令
+ * 起重机移动指令处理器（纯离散版本）
+ *
+ * 职责：
+ * - 校验移动指令合法性
+ * - 计算目标坐标
+ * - 纯离散耗时计算并调度 ARRIVAL 事件
+ * - 设置虚拟插值字段用于前端动画
  */
 @Component
 public class CmdCraneMoveHandler implements SimEventHandler {
@@ -53,7 +59,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             throw new BusinessException(String.format("设备 %s 正在作业中，无法执行移动", craneId));
         }
 
-        // 🟢 修改点：直接将载荷转为 CraneMoveReq 对象
+        // 解析指令
         CraneMoveReq req = (CraneMoveReq) event.getData();
         Double speed = req.getSpeed();
         if (speed == null || speed <= 0) {
@@ -61,7 +67,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         }
         double distance = req.getDistance() != null ? req.getDistance() : 0;
 
-        // 计算目标坐标
+        // 当前坐标
         double posX = device.getPosX() != null ? device.getPosX() : 0;
         double posY = device.getPosY() != null ? device.getPosY() : 0;
         Point targetPoint;
@@ -78,10 +84,10 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             // 使用默认值
         }
 
+        // 计算目标坐标
         if (DeviceStateEnum.MOVE_HORIZONTAL.equals(req.getMoveType())) {
             // 水平移动：仅允许 QC 在其红色轨道上水平移动
             if (deviceType == DeviceTypeEnum.ASC) {
-                // ASC 被严格限制在紫色虚线轨道上，仅允许沿轨道做垂直移动
                 throw new BusinessException(String.format("ASC [%s] 只能沿紫色轨道做垂直移动，禁止水平移动", craneId));
             }
 
@@ -136,8 +142,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             targetPoint = new Point(posX + distance, posY);
         }
 
-        // ── instanceof 物理轴向锁定（第二道防线，防止类型系统之外的意外绕过）──
-        // 注：第一道防线是上方的 moveType 枚举检查，两道防线互补
+        // 物理轴向锁定校验
         if (device instanceof QcDevice) {
             double deltaY = Math.abs(targetPoint.getY() - posY);
             if (deltaY > 0.5) {
@@ -154,7 +159,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             }
         }
 
-        // ── 通用路网校验（第三道防线）：终点必须在对应类型的有效轨道上 ──
+        // 路网校验
         double targetX = targetPoint.getX();
         double targetY = targetPoint.getY();
         boolean isOnPath = mapDataService.isPositionOnPath(device.getType().name(), targetX, targetY);
@@ -164,16 +169,7 @@ public class CmdCraneMoveHandler implements SimEventHandler {
                     "脱轨异常: 起重机 [%s] 目标坐标 (%.1f, %.1f) 不在港口有效路网上！", craneId, targetX, targetY));
         }
 
-        // ── 运动意图字段：记录目标坐标，由引擎 Tick 推演 ──
-        device.setTargetX(targetX);
-        device.setTargetY(targetY);
-        device.setMoveSpeed(speed > 0 ? speed : 2.0);
-
-        // legacy 字段保留兼容
-        device.setSpeed(speed);
-        device.setCurrentTargetPos(targetPoint);
-
-        // ── 使用单轴距离计算移动耗时 ──
+        // ==================== 纯离散耗时计算 ====================
         double travelDistance;
         if (device instanceof QcDevice) {
             travelDistance = Math.abs(targetX - posX);
@@ -182,20 +178,47 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         } else {
             travelDistance = Math.abs(targetX - posX) + Math.abs(targetY - posY);
         }
-        long durationMs = (long) ((travelDistance / speed) * 1000);
 
-        // 调度 MOVE_START 事件
-        SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
-        moveStart.addSubject("CRANE", craneId);
+        long durationMs;
+        if (speed <= 0 || travelDistance <= 0) {
+            durationMs = 0;
+        } else {
+            durationMs = (long) ((travelDistance / speed) * 1000);
+        }
 
-        // 调度 ARRIVAL 事件
-        SimEvent arrivalEvent = engine.scheduleEvent(event.getEventId(),
-                context.getSimTime() + durationMs,
+        long currentSimTime = context.getSimTime();
+        long arrivalTime = currentSimTime + durationMs;
+
+        // ==================== 设置运动意图字段 ====================
+        device.setTargetX(targetX);
+        device.setTargetY(targetY);
+        device.setMoveSpeed(speed);
+        device.setSpeed(speed);
+        device.setState(DeviceStateEnum.MOVING);
+
+        // 清空剩余目标列表（起重机通常是单段直线移动）
+        device.setRemainingMoveTargets(null);
+
+        // ==================== 设置虚拟插值字段（用于前端平滑动画）====================
+        device.setMoveStartTime(currentSimTime);
+        device.setMoveStartPosX(posX);
+        device.setMoveStartPosY(posY);
+        device.setExpectedArrivalTime(arrivalTime);
+
+        // ==================== 直接调度 ARRIVAL 事件（不再调度 MOVE_START）=============
+        SimEvent arrivalEvent = engine.scheduleEvent(
+                event.getEventId(),
+                arrivalTime,
                 EventTypeEnum.ARRIVAL,
-                targetPoint);
+                targetPoint
+        );
         arrivalEvent.addSubject("CRANE", craneId);
 
-        log.info("[CMD_CRANE_MOVE] 起重机 [{}] 移动: ({},{}) -> ({},{}), 距离: {:.1f}m, 预计耗时: {}ms",
-                craneId, posX, posY, targetX, targetY, travelDistance, durationMs);
+        log.info("[CMD_CRANE_MOVE] 起重机 [{}] 调度 ARRIVAL: ({},{}) -> ({},{}), " +
+                        "距离={}m, 速度={}m/s, 耗时={}ms, 到达时间={}",
+                craneId,
+                String.format("%.1f", posX), String.format("%.1f", posY),
+                String.format("%.1f", targetX), String.format("%.1f", targetY),
+                String.format("%.1f", travelDistance), speed, durationMs, arrivalTime);
     }
 }

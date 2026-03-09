@@ -5,7 +5,6 @@ package common.consts;
  */
 public enum EventTypeEnum {
     //  物理移动事件
-    MOVE_START,    // 开始向下一个路径点移动
     ARRIVAL,       // 到达路径点
 
     //  外部指令事件 (API -> 内部事件)

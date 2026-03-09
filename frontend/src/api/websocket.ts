@@ -67,6 +67,11 @@ class SimulationWebSocketService {
             this.client!.subscribe('/topic/sim-events', (message) => {
                 this.handleMessage(message);
             });
+
+            // 订阅状态快照主题（后端推送全量设备状态）
+            this.client!.subscribe('/topic/sim-state', (message) => {
+                this.handleStateMessage(message);
+            });
         };
 
         // STOMP 协议错误回调
@@ -97,6 +102,23 @@ class SimulationWebSocketService {
             console.log('[WS] 收到事件:', eventData.eventType, eventData.deviceId);
         } catch (e) {
             console.error('[WS] 消息解析异常:', e);
+        }
+    }
+
+    /**
+     * 处理接收到的状态快照消息
+     * @param message STOMP 消息对象，包含全量设备状态
+     */
+    private handleStateMessage(message: any) {
+        const simStore = useSimStore();
+        try {
+            const stateData = JSON.parse(message.body);
+            // 将状态快照数据存入 Store
+            simStore.handleStateSnapshot(stateData);
+
+            console.log('[WS] 收到状态快照: simTime=', stateData.simTime);
+        } catch (e) {
+            console.error('[WS] 状态快照解析异常:', e);
         }
     }
 

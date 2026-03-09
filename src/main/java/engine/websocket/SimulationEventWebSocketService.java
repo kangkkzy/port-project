@@ -1,8 +1,10 @@
 package engine.websocket;
 
+import common.consts.DeviceStateEnum;
 import common.consts.EventTypeEnum;
 import engine.SimEvent;
 import engine.context.GlobalContext;
+import model.dto.snapshot.DeviceSnapshotDto;
 import model.entity.BaseDevice;
 import model.entity.Truck;
 import lombok.RequiredArgsConstructor;
@@ -10,9 +12,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -32,7 +36,6 @@ public class SimulationEventWebSocketService {
      */
     private static final Set<EventTypeEnum> BROADCAST_EVENTS = Collections.unmodifiableSet(
             new HashSet<>(java.util.Arrays.asList(
-                    EventTypeEnum.MOVE_START,
                     EventTypeEnum.ARRIVAL,
                     EventTypeEnum.FETCH_DONE,
                     EventTypeEnum.PUT_DONE
@@ -49,7 +52,7 @@ public class SimulationEventWebSocketService {
         // 检查事件类型是否在广播列表中
         if (!BROADCAST_EVENTS.contains(event.getType())) return;
 
-        // MOVE_START/ARRIVAL 事件主体 key 是 "TRUCK" 或 "CRANE"，不是 "DEVICE"，需逐级回退
+        // ARRIVAL 事件主体 key 是 "TRUCK" 或 "CRANE"，不是 "DEVICE"，需逐级回退
         String deviceId = event.getPrimarySubject("DEVICE");
         if (deviceId == null) deviceId = event.getPrimarySubject("TRUCK");
         if (deviceId == null) deviceId = event.getPrimarySubject("CRANE");
@@ -70,7 +73,7 @@ public class SimulationEventWebSocketService {
             payload.put("currentPosX", device.getRealTimePosX(currentSimTime));
             payload.put("currentPosY", device.getRealTimePosY(currentSimTime));
 
-            // 推送终点坐标（前端 lerp 动画的目标）：优先用集卡的剩余路径首点，其次用 currentTargetPos
+            // 推送终点坐标（前端 lerp 动画的目标）：优先用集卡的剩余路径首点，其次用 targetX/targetY
             model.entity.Point targetPos = null;
             if (device instanceof Truck) {
                 Truck truck = (Truck) device;
@@ -79,7 +82,10 @@ public class SimulationEventWebSocketService {
                 }
             }
             if (targetPos == null) {
-                targetPos = device.getCurrentTargetPos(); // 覆盖 QC/ASC 等起重机
+                // 使用 BaseDevice 的 targetX/targetY 字段
+                if (device.getTargetX() != null && device.getTargetY() != null) {
+                    targetPos = new model.entity.Point(device.getTargetX(), device.getTargetY());
+                }
             }
             if (targetPos != null) {
                 payload.put("targetPosX", targetPos.getX());
@@ -124,8 +130,8 @@ public class SimulationEventWebSocketService {
     }
 
     /**
-     * 广播状态快照（包含所有设备的实时坐标，用于前端动画插值）
-     * 使用 getRealTimePosX/getRealTimePosY 获取插值后的坐标，保证动画平滑
+     * 广播状态快照（包含所有设备的完整状态，用于前端动画插值）
+     * 后端只在事件发生时广播，前端自行根据 moveStartTime/expectedArrivalTime 进行线性插值
      *
      * @param context 全局上下文
      */
@@ -137,37 +143,69 @@ public class SimulationEventWebSocketService {
         payload.put("type", "STATE_SNAPSHOT");
         payload.put("simTime", currentSimTime);
 
-        // 收集所有设备的插值坐标
-        Map<String, Map<String, Double>> devicePositions = new HashMap<>();
+        // 构建所有设备的完整快照（包含前端插值所需字段）
+        List<DeviceSnapshotDto> deviceSnapshots = new ArrayList<>();
 
-        // 收集集卡坐标
+        // 收集集卡快照
         for (Truck truck : context.getTruckMap().values()) {
-            Map<String, Double> pos = new HashMap<>();
-            pos.put("x", truck.getRealTimePosX(currentSimTime));
-            pos.put("y", truck.getRealTimePosY(currentSimTime));
-            devicePositions.put(truck.getId(), pos);
+            deviceSnapshots.add(buildDeviceSnapshot(truck, currentSimTime));
         }
 
-        // 收集起重机坐标
+        // 收集起重机快照（岸桥 QC）
         for (BaseDevice crane : context.getQcMap().values()) {
-            Map<String, Double> pos = new HashMap<>();
-            pos.put("x", crane.getRealTimePosX(currentSimTime));
-            pos.put("y", crane.getRealTimePosY(currentSimTime));
-            devicePositions.put(crane.getId(), pos);
-        }
-        for (BaseDevice crane : context.getAscMap().values()) {
-            Map<String, Double> pos = new HashMap<>();
-            pos.put("x", crane.getRealTimePosX(currentSimTime));
-            pos.put("y", crane.getRealTimePosY(currentSimTime));
-            devicePositions.put(crane.getId(), pos);
+            deviceSnapshots.add(buildDeviceSnapshot(crane, currentSimTime));
         }
 
-        payload.put("devicePositions", devicePositions);
+        // 收集起重机快照（龙门吊 ASC）
+        for (BaseDevice crane : context.getAscMap().values()) {
+            deviceSnapshots.add(buildDeviceSnapshot(crane, currentSimTime));
+        }
+
+        payload.put("devices", deviceSnapshots);
 
         try {
             messagingTemplate.convertAndSend("/topic/sim-state", payload);
         } catch (Exception e) {
             log.warn("广播状态快照失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 构建单个设备快照，包含前端插值所需的完整运动信息
+     *
+     * @param device 设备实体
+     * @param currentSimTime 当前仿真时间
+     * @return 设备快照 DTO
+     */
+    private DeviceSnapshotDto buildDeviceSnapshot(BaseDevice device, long currentSimTime) {
+        DeviceSnapshotDto dto = new DeviceSnapshotDto();
+
+        // 基础属性
+        dto.setId(device.getId());
+        dto.setType(device.getType());
+        dto.setState(device.getState());
+        dto.setCurrWiRefNo(device.getCurrWiRefNo());
+
+        // 当前位置（离散事件触发时的真实位置）
+        dto.setPosX(device.getPosX());
+        dto.setPosY(device.getPosY());
+
+        // 特有属性 (仅集卡有电量)
+        if (device instanceof Truck) {
+            Truck truck = (Truck) device;
+            dto.setPowerLevel(truck.getPowerLevel());
+            dto.setNeedCharge(truck.isNeedCharge());
+        }
+
+        // ==================== 前端插值所需字段 ====================
+        // 直接映射原始字段，让前端自行计算插值
+        dto.setMoveStartTime(device.getMoveStartTime());
+        dto.setMoveStartPosX(device.getMoveStartPosX());
+        dto.setMoveStartPosY(device.getMoveStartPosY());
+        dto.setTargetX(device.getTargetX());
+        dto.setTargetY(device.getTargetY());
+        dto.setExpectedArrivalTime(device.getExpectedArrivalTime());
+
+        return dto;
     }
 }

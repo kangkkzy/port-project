@@ -19,6 +19,10 @@ import java.util.ArrayList;
 /**
  * 场景加载服务：解析 scenario JSON，清理并重新填充 GlobalContext 中的设备、箱子、指令。
  * 消除 SimTestController 中的硬编码初始化逻辑。
+ *
+ * 支持两种加载方式：
+ * 1. 从 classpath 本地文件加载（load 方法）
+ * 2. 从外部 API 接收 JSON payload 加载（loadFromJson 方法）
  */
 @Service
 @Slf4j
@@ -26,6 +30,27 @@ import java.util.ArrayList;
 public class ScenarioLoaderService {
 
     private final ObjectMapper objectMapper;
+
+    /**
+     * 从外部系统接收的 JSON payload 加载场景。
+     * 用于外部调度中心通过 /api/v1/sim/init 接口下发完整场景配置。
+     *
+     * @param jsonPayload 场景配置的 JSON 字符串
+     * @return 加载的设备与指令数量摘要
+     */
+    public LoadResult loadFromJson(String jsonPayload) {
+        if (jsonPayload == null || jsonPayload.trim().isEmpty()) {
+            throw new IllegalArgumentException("场景 JSON payload 不能为空");
+        }
+
+        try {
+            ScenarioFileDto dto = objectMapper.readValue(jsonPayload, ScenarioFileDto.class);
+            return applyToContext(dto);
+        } catch (Exception e) {
+            log.error("解析外部场景 JSON 失败", e);
+            throw new RuntimeException("加载外部场景失败: " + e.getMessage(), e);
+        }
+    }
 
     /**
      * 从 classpath:resources/scenarios/ 下加载指定 JSON 文件，清理并填充全局上下文。

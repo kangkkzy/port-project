@@ -1,7 +1,5 @@
 package service.algorithm;
 
-import java.util.Collection;
-
 /**
  * 设备物理参数配置服务接口
  * 负责为仿真引擎提供去硬编码的物理属性如速度、耗电率、重载系数、安全阈值等。
@@ -52,15 +50,4 @@ public interface DevicePhysicsService {
      * @throws common.exception.BusinessException 若查不到配置时抛出
      */
     double getSafePowerThreshold(String deviceId);
-
-    /**
-     * 物理推演：更新所有移动中设备的坐标
-     * 实现曼哈顿正交移动（L型路径）和单轴移动（起重机）
-     * 动态到达触发：当物理坐标真实触碰终点时，自动触发 REPORT_IDLE 事件
-     * @param context 全局上下文
-     * @param simulationEngine 仿真引擎实例（用于动态触发事件）
-     * @param deltaTimeSec 距离上次推演经过的真实秒数（已乘以 timeScale）
-     */
-    void updateMovingDevices(engine.context.GlobalContext context, engine.SimulationEngine simulationEngine, double deltaTimeSec);
 }
-

@@ -7,7 +7,6 @@ import engine.context.GlobalContext;
 import engine.log.SimulationEventLog;
 import engine.log.SimulationErrorLog;
 import engine.websocket.SimulationEventWebSocketService;
-import service.algorithm.DevicePhysicsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import model.dto.snapshot.EventLogEntryDto;
@@ -52,16 +51,7 @@ public class SimulationEngine implements InitializingBean {
     @Autowired(required = false)
     private SimulationEventWebSocketService webSocketService;   // 可选，没有也能运行
 
-    @Autowired
-    private DevicePhysicsService devicePhysicsService;  // 物理推演服务
-
     private final GlobalContext context = GlobalContext.getInstance();
-
-    /** 状态快照广播间隔（毫秒） */
-    private static final long STATE_BROADCAST_INTERVAL_MS = 50;
-
-    /** 上次状态广播的真实时间戳 */
-    private long lastStateBroadcastTime = 0;
 
     // -------------------- 数据结构 --------------------
 
@@ -242,10 +232,7 @@ public class SimulationEngine implements InitializingBean {
                 // 执行处理器
                 handler.handle(event, this, context);
 
-                // 通过 WebSocket 推送事件给前端（如果服务可用）
-                if (webSocketService != null) {
-                    webSocketService.broadcast(event);
-                }
+                // 注意：事件驱动广播已在 runLoop 中统一处理，不再单独广播事件
             } catch (Exception e) {
                 // 处理异常，触发全局熔断
                 String errorMsg = String.format("事件处理异常，触发熔断: Type=%s, Id=%s, Time=%d, Error=%s",
@@ -409,7 +396,6 @@ public class SimulationEngine implements InitializingBean {
      */
     private void runLoop() {
         log.info("引擎后台循环已启动 (threadId={})", Thread.currentThread().getId());
-        long lastBroadcastSimTime = 0;  // 上次广播的仿真时间
 
         while (engineState == EngineState.RUNNING) {
             try {
@@ -432,31 +418,17 @@ public class SimulationEngine implements InitializingBean {
                 // ── 取出并处理事件 ──
                 SimEvent event = eventQueue.poll();
                 if (event != null) {
-                    // 跳过系统同步事件的常规处理（避免递归）
-                    if (event.getType() == EventTypeEnum.SYS_SYNC_TICK) {
-                        // 系统同步事件：只负责广播状态
-                        if (webSocketService != null) {
-                            webSocketService.broadcastState(context);
-                        }
-                        lastBroadcastSimTime = eventTriggerTime;
-                        continue;
-                    }
-
                     processEvent(event);
-                    // 广播事件给前端（broadcast 内部已按 BROADCAST_EVENTS 过滤非关键事件）
+
+                    // ── 事件驱动广播 ──
+                    // 后端只在事件发生并处理后进行全量快照广播
+                    // 纯离散系统中，只有事件发生时设备状态、目标、预计到达时间才会改变
                     if (webSocketService != null) {
                         try {
-                            webSocketService.broadcast(event);
+                            webSocketService.broadcastState(context);
                         } catch (Exception broadcastEx) {
-                            log.warn("事件广播失败（不影响仿真继续运行）: {}", broadcastEx.getMessage());
+                            log.warn("状态快照广播失败（不影响仿真继续运行）: {}", broadcastEx.getMessage());
                         }
-                    }
-
-                    // ── 状态快照广播 ──
-                    // 每隔 50ms 仿真时间广播一次状态
-                    if (webSocketService != null && (eventTriggerTime - lastBroadcastSimTime) >= STATE_BROADCAST_INTERVAL_MS) {
-                        webSocketService.broadcastState(context);
-                        lastBroadcastSimTime = eventTriggerTime;
                     }
                 }
 

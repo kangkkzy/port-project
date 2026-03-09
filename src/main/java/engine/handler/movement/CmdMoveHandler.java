@@ -128,9 +128,13 @@ public class CmdMoveHandler implements SimEventHandler {
         device.setMoveSpeed(speed);
         device.setState(DeviceStateEnum.MOVING);
 
-        // 设置第一段的速度和目标（legacy 字段，保留兼容）
+        // 设置第一段的速度和目标
         device.setSpeed(speed);
-        device.setCurrentTargetPos(remainingTargets.get(0));
+        // 使用 targetX/targetY 字段代替 setCurrentTargetPos
+        if (remainingTargets.get(0) != null) {
+            device.setTargetX(remainingTargets.get(0).getX());
+            device.setTargetY(remainingTargets.get(0).getY());
+        }
 
         // === 纯离散事件调度：计算耗时并立即调度 ARRIVAL 事件 ===
         // 取出第一个目标点（从索引1开始，因为索引0是当前位置）

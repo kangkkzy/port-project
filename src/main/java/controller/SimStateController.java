@@ -169,11 +169,10 @@ public class SimStateController {
             dto.setType(device.getType());
             dto.setState(device.getState());
 
-            // 移动中使用插值坐标（否则离散仿真只在 ARRIVAL 时更新坐标，前端看不到运动过程）
+            // 移动中使用插值坐标（使用 getRealTimePosX/Y 方法）
             if (DeviceStateEnum.MOVING.equals(device.getState())) {
-                Point p = device.getInterpolatedPos(ctx.getSimTime());
-                dto.setPosX(p.getX());
-                dto.setPosY(p.getY());
+                dto.setPosX(device.getRealTimePosX(ctx.getSimTime()));
+                dto.setPosY(device.getRealTimePosY(ctx.getSimTime()));
             } else {
                 dto.setPosX(device.getPosX());
                 dto.setPosY(device.getPosY());

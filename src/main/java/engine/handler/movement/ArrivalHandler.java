@@ -99,9 +99,6 @@ public class ArrivalHandler implements SimEventHandler {
             device.setTargetY(nextTarget.getY());
             device.setExpectedArrivalTime(nextArrivalTime);
 
-            // 更新当前目标点
-            device.setCurrentTargetPos(nextTarget);
-
             // 如果所有目标点都到达了，清空列表
             if (remainingTargets.isEmpty()) {
                 device.setRemainingMoveTargets(null);
@@ -138,7 +135,6 @@ public class ArrivalHandler implements SimEventHandler {
 
         // 清空相关状态
         device.setRemainingMoveTargets(null);
-        device.setCurrentTargetPos(null);
         device.setTargetX(null);
         device.setTargetY(null);
         device.setMoveSpeed(null);

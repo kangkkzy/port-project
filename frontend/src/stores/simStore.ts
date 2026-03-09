@@ -10,7 +10,8 @@ import {
 export const useSimStore = defineStore('simulation', {
     state: () => ({
         // ---------- 仿真核心数据 ----------
-        simTime: 0,                      // 当前仿真时间（毫秒）
+        simTime: 0,                      // 后端推送的仿真时间（毫秒）
+        visualSimTime: 0,                // 前端本地视觉仿真时间（用于插值计算）
         devices: [] as any[],            // 所有设备（卡车、起重机等）
         fences: [] as any[],             // 围栏设备
         chargingStations: [] as any[],   // 充电桩
@@ -95,6 +96,7 @@ export const useSimStore = defineStore('simulation', {
         /**
          * 更新快照：调用 getSnapshot 接口，并用返回数据刷新 state。
          * 同时根据设备状态标记 Z 轴作业中的设备。
+         * 保存前端插值所需的完整运动信息。
          */
         async updateSnapshot() {
             try {
@@ -102,7 +104,21 @@ export const useSimStore = defineStore('simulation', {
                 const data = res.data || res;
                 if (data) {
                     this.simTime = data.simTime || 0;
-                    this.devices = data.devices || [];
+                    // 同步视觉仿真时间
+                    this.visualSimTime = data.simTime || 0;
+
+                    // 兼容旧格式（只有 posX/posY）和新格式（包含插值字段）
+                    const newDevices = data.devices || [];
+                    newDevices.forEach((newDev: any) => {
+                        const existingDev = this.devices.find(d => d.id === newDev.id);
+                        if (existingDev) {
+                            // 合并插值字段，保留前端动画状态
+                            Object.assign(existingDev, newDev);
+                        } else {
+                            this.devices.push(newDev);
+                        }
+                    });
+
                     this.fences = data.fences || [];
                     this.chargingStations = data.chargingStations || [];
                     this.vessels = data.vessels || [];
@@ -339,6 +355,44 @@ export const useSimStore = defineStore('simulation', {
             const now = Date.now();
             for (const [deviceId, expiryTime] of this.deviceAlerts.entries()) {
                 if (now > expiryTime) { this.deviceAlerts.delete(deviceId); }
+            }
+        },
+
+        /**
+         * 处理 WebSocket 推送的状态快照
+         * 包含所有设备的完整状态，用于前端插值计算
+         * @param stateData 状态快照数据
+         */
+        handleStateSnapshot(stateData: any) {
+            if (!stateData) return;
+
+            // 更新仿真时间和视觉时间
+            this.simTime = stateData.simTime || 0;
+            this.visualSimTime = stateData.simTime || 0;
+
+            // 更新所有设备状态
+            if (stateData.devices && Array.isArray(stateData.devices)) {
+                stateData.devices.forEach((newDev: any) => {
+                    const existingDev = this.devices.find(d => d.id === newDev.id);
+                    if (existingDev) {
+                        // 合并新数据，保留前端动画状态
+                        // 关键：保留 moveStartTime, expectedArrivalTime 等插值字段
+                        Object.assign(existingDev, newDev);
+                    } else {
+                        this.devices.push(newDev);
+                    }
+                });
+            }
+
+            // 更新引擎熔断状态
+            if (stateData.globalSuspended !== undefined) {
+                this.isSuspended = stateData.globalSuspended;
+            }
+            if (stateData.suspendedBizTypes) {
+                this.suspendedBizTypes = stateData.suspendedBizTypes;
+            }
+            if (stateData.suspendedEventIds) {
+                this.suspendedEventIds = stateData.suspendedEventIds;
             }
         }
     }
