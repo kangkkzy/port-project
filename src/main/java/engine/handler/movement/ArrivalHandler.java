@@ -2,6 +2,7 @@ package engine.handler.movement;
 
 import common.consts.DeviceStateEnum;
 import common.consts.EventTypeEnum;
+import common.exception.BusinessException;
 import engine.SimEvent;
 import engine.SimEventHandler;
 import engine.SimulationEngine;
@@ -73,15 +74,22 @@ public class ArrivalHandler implements SimEventHandler {
                             Math.pow(nextTarget.getY() - currentY, 2)
             );
 
-            // 获取设备速度
+            // 获取设备速度（严格校验：速度必须大于0）
             Double speed = device.getSpeed();
             if (speed == null || speed <= 0) {
                 speed = device.getMoveSpeed();
             }
+            if (speed == null || speed <= 0) {
+                throw new BusinessException(String.format("物理推演错误: 设备 [%s] 未配置移动速度", deviceId));
+            }
 
-            // 计算当前段耗时（毫秒）
+            // 计算当前段耗时（严格校验：距离>0时速度必须>0）
+            if (distance > 0 && speed <= 0) {
+                throw new BusinessException(String.format("物理推演错误: 剩余距离大于0但移动速度为0，设备 [%s] 禁止瞬移", deviceId));
+            }
+
             long duration;
-            if (speed == null || speed <= 0 || distance <= 0) {
+            if (distance <= 0) {
                 duration = 0;
             } else {
                 duration = (long) ((distance / speed) * 1000);

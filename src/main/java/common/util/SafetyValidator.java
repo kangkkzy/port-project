@@ -33,7 +33,7 @@ public class SafetyValidator {
      * 岸桥防碰撞校验
      */
     public boolean checkQcInterference(String targetQcId, double targetPosX) {
-        // 必须配置 minQcDistance，否则报错
+        // 必须配置 minQcDistance 否则报错
         double minDistance = mapDataService.getParameter("minQcDistance");
 
         Map<String, QcDevice> qcMap = GlobalContext.getInstance().getQcMap();

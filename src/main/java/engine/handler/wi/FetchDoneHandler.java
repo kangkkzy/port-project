@@ -38,9 +38,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class FetchDoneHandler implements SimEventHandler {
 
-    private static final double DEFAULT_PROXIMITY_THRESHOLD = 5.0;  // 默认接触距离阈值
-    private static final double QC_TRUCK_Y_OFFSET = 60.0;           // QC轨道(140)与集卡道路(200)的偏移
-
     // 堆场位置解析正则：YARD_A_01_02_03 表示 箱区_贝位_排号_层号
     private static final Pattern YARD_POS_PATTERN = Pattern.compile("YARD_(\\w+)_(\\d+)_(\\d+)_(\\d+)");
 
@@ -198,28 +195,43 @@ public class FetchDoneHandler implements SimEventHandler {
     /**
      * 获取设备允许的作业跨度
      *
-     * DES架构设计：
-     * - 绝对接触作业（如堆场内地面作业）：距离 < 5米
-     * - 跨距伸缩作业（如QC/ASC与集卡）：允许较大的垂直/水平偏移
+     * DES架构设计：从外部配置获取作业跨度参数
      */
     private double getAllowedOperationSpan(BaseDevice crane, BaseDevice truck) {
         DeviceTypeEnum craneType = crane.getType();
 
-        if (craneType == DeviceTypeEnum.QC) {
-            // 岸桥(QC)与集卡的跨距作业
-            // QC 在水平轨道 Y=140，集卡在车道 Y=200
-            // 允许 Y 方向偏移 60 米，X 方向相近即可
-            return QC_TRUCK_Y_OFFSET + DEFAULT_PROXIMITY_THRESHOLD;
-        }
-        else if (craneType == DeviceTypeEnum.ASC) {
-            // 龙门吊(ASC)与集卡的跨距作业
-            // ASC 在垂直轨道 X=175/425/675，集卡在车道 Y=200
-            // 允许 X 方向接近轨道，Y 方向在车道上
-            return 100.0; // 近似认为 X 偏差 < 100 且 Y 在车道上即可
+        double baseThreshold;
+        double yOffset;
+
+        // 从外部配置获取基础接触阈值和跨距偏移
+        try {
+            baseThreshold = mapDataService.getParameter("proximityThreshold");
+        } catch (Exception e) {
+            throw new BusinessException("物理参数缺失: proximityThreshold 未配置");
         }
 
-        // 默认使用绝对接触阈值
-        return DEFAULT_PROXIMITY_THRESHOLD;
+        try {
+            yOffset = mapDataService.getParameter("qcTruckYOffset");
+        } catch (Exception e) {
+            throw new BusinessException("物理参数缺失: qcTruckYOffset 未配置");
+        }
+
+        if (craneType == DeviceTypeEnum.QC) {
+            // 岸桥(QC)与集卡的跨距作业
+            return yOffset + baseThreshold;
+        }
+        else if (craneType == DeviceTypeEnum.ASC) {
+            // 龙门吊(ASC)与集卡的跨距作业 - 从外部配置获取
+            double ascSpan;
+            try {
+                ascSpan = mapDataService.getParameter("ascOperationSpan");
+            } catch (Exception e) {
+                throw new BusinessException("物理参数缺失: ascOperationSpan 未配置");
+            }
+            return ascSpan;
+        }
+
+        return baseThreshold;
     }
 }
 

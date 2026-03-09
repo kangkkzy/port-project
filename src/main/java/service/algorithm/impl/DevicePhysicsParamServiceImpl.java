@@ -8,16 +8,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import service.algorithm.DevicePhysicsParamService;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 设备物理参数服务实现
- * 从 GlobalContext 获取预加载的设备物理参数，或从外部接口获取
+ *
+ * 严格模式：所有参数必须在场景初始化时由外部系统注入到 GlobalContext 中。
+ * 如果运行时找不到参数，说明外部系统漏传，引擎直接抛出异常。
  */
 @Service
 public class DevicePhysicsParamServiceImpl implements DevicePhysicsParamService {
@@ -32,87 +30,41 @@ public class DevicePhysicsParamServiceImpl implements DevicePhysicsParamService 
             throw new BusinessException("设备ID不能为空");
         }
 
+        // 纯粹的读取逻辑，不尝试调用外部接口
         DevicePhysicsParam param = context.getDevicePhysicsParamMap().get(deviceId);
-        if (param != null) {
-            return param;
-        }
-
-        param = fetchFromExternalApi(deviceId);
-
         if (param == null) {
             throw new BusinessException(String.format(
-                    "设备 [%s] 物理参数未配置，请确保外部接口已返回该设备的数据", deviceId));
+                    "设备 [%s] 物理参数缺失，请确保在场景初始化时由外部算法下发了该数据", deviceId));
         }
 
-        context.getDevicePhysicsParamMap().put(deviceId, param);
         return param;
     }
 
     @Override
     public Map<String, DevicePhysicsParam> getPhysicsParams(Collection<String> deviceIds) {
-        Map<String, DevicePhysicsParam> result = new HashMap<>();
         if (deviceIds == null || deviceIds.isEmpty()) {
-            return result;
+            throw new BusinessException("设备ID列表不能为空");
         }
 
+        // 逐个获取，任一缺失则抛异常
+        Map<String, DevicePhysicsParam> result = new java.util.HashMap<>();
         for (String id : deviceIds) {
             result.put(id, getPhysicsParam(id));
         }
-
         return result;
     }
 
     @Override
-    public void syncPhysicsParams(List<String> deviceIds) {
-        if (deviceIds == null || deviceIds.isEmpty()) {
-            return;
-        }
-
-        log.info("开始同步设备物理参数，数量: {}", deviceIds.size());
-
-        Map<String, DevicePhysicsParam> params = fetchBatchFromExternalApi(deviceIds);
-
-        List<String> missingDevices = deviceIds.stream()
-                .filter(id -> !params.containsKey(id))
-                .collect(Collectors.toList());
-
-        if (!missingDevices.isEmpty()) {
-            throw new BusinessException(String.format(
-                    "以下设备物理参数未配置: %s，请确保外部接口已返回这些设备的数据",
-                    String.join(", ", missingDevices)));
-        }
-
-        context.getDevicePhysicsParamMap().putAll(params);
-
-        log.info("设备物理参数同步完成，共 {} 台设备", params.size());
+    public void syncPhysicsParams(java.util.List<String> deviceIds) {
+        // 此方法已废弃，不再支持运行时同步
+        // 外部系统必须在场景初始化时通过 /sim/scenario/init 接口注入所有参数
+        throw new BusinessException("syncPhysicsParams 已废弃，请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
     }
 
     @Override
     public void preloadAllParams(Collection<String> allDeviceIds) {
-        if (allDeviceIds == null || allDeviceIds.isEmpty()) {
-            return;
-        }
-
-        log.info("预加载所有设备物理参数，数量: {}", allDeviceIds.size());
-
-        syncPhysicsParams(new ArrayList<>(allDeviceIds));
-    }
-
-    /**
-     * 批量从外部接口获取设备物理参数。
-     * TODO: 接入真实外部接口后，使用 deviceIds 请求并返回 Map。
-     */
-    @SuppressWarnings("unused")
-    private Map<String, DevicePhysicsParam> fetchBatchFromExternalApi(List<String> deviceIds) {
-        return new HashMap<>();
-    }
-
-    /**
-     * 从外部接口获取设备物理参数。
-     * TODO: 接入真实外部接口后，使用 deviceId 请求并返回 DevicePhysicsParam。
-     */
-    @SuppressWarnings("unused")
-    private DevicePhysicsParam fetchFromExternalApi(String deviceId) {
-        return null;
+        // 此方法已废弃，不再支持运行时预加载
+        // 外部系统必须在场景初始化时通过 /sim/scenario/init 接口注入所有参数
+        throw new BusinessException("preloadAllParams 已废弃，请通过 /sim/scenario/init 接口在场景初始化时注入所有物理参数");
     }
 }

@@ -12,18 +12,26 @@ import model.dto.request.CraneOperationReq;
 import model.entity.BaseDevice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import service.algorithm.MapDataService;
 
 /**
  * 吊具操作通用处理 (Pick/Set)
+ *
+ * 严格模式：所有参数从外部配置获取
  */
 @Component
 public class CmdCraneOpHandler implements SimEventHandler {
 
     private static final Logger log = LoggerFactory.getLogger(CmdCraneOpHandler.class);
 
-    /** 起重机与集卡协同作业允许的最大空间距离（米）。适当放宽到 100 米以容纳极值情况 */
-    private static final double MAX_TRANSFER_DISTANCE = 100.0;
+    private final MapDataService mapDataService;
+
+    @Autowired
+    public CmdCraneOpHandler(MapDataService mapDataService) {
+        this.mapDataService = mapDataService;
+    }
 
     @Override
     public EventTypeEnum getType() {
@@ -74,18 +82,26 @@ public class CmdCraneOpHandler implements SimEventHandler {
             // 改用曼哈顿距离判断（更符合正交移动特征）
             double distance = Math.abs(crane.getPosX() - truck.getPosX()) + Math.abs(crane.getPosY() - truck.getPosY());
 
-            if (distance > MAX_TRANSFER_DISTANCE) {
+            // 从外部配置获取最大交接距离
+            double maxTransferDistance;
+            try {
+                maxTransferDistance = mapDataService.getParameter("maxTransferDistance");
+            } catch (Exception e) {
+                throw new BusinessException("物理参数缺失: maxTransferDistance 未配置");
+            }
+
+            if (distance > maxTransferDistance) {
                 log.error("协同物理违规: 起重机 [{}] 与集卡 [{}] 距离 {:.1f}m 超出交接区范围 {}m. 坐标: 吊机({:.1f}, {:.1f}), 卡车({:.1f}, {:.1f})",
-                        craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                        craneId, targetTruckId, distance, maxTransferDistance,
                         crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY());
                 throw new BusinessException(String.format(
                         "物理违规：起重机 [%s] 与 集卡 [%s] 距离为 %.1f 米，超出交接作业极值 %.1f 米！当前坐标: 吊机(%.1f, %.1f), 卡车(%.1f, %.1f)",
-                        craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                        craneId, targetTruckId, distance, maxTransferDistance,
                         crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY()));
             }
 
             log.info("[CMD_CRANE_OP] 起重机 [{}] 与集卡 [{}] 距离 {:.1f}m（允许范围 {:.1f}m），作业合法。坐标: 吊机({:.1f}, {:.1f}), 卡车({:.1f}, {:.1f})",
-                    craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                    craneId, targetTruckId, distance, maxTransferDistance,
                     crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY());
         }
 

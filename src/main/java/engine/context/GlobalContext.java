@@ -56,6 +56,13 @@ public class GlobalContext {
     // 设备物理参数 (从外部接口获取，按设备ID存储)
     private final Map<String, DevicePhysicsParam> devicePhysicsParamMap = new ConcurrentHashMap<>();
 
+    /**
+     * 获取设备物理参数Map
+     */
+    public Map<String, DevicePhysicsParam> getDevicePhysicsParamMap() {
+        return devicePhysicsParamMap;
+    }
+
     // 防止外部直接 new 对象
     private GlobalContext() {}
 

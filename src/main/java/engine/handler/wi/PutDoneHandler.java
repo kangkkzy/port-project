@@ -38,9 +38,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class PutDoneHandler implements SimEventHandler {
 
-    private static final double DEFAULT_PROXIMITY_THRESHOLD = 5.0;  // 默认接触距离阈值
-    private static final double QC_TRUCK_Y_OFFSET = 60.0;           // QC轨道(140)与集卡道路(200)的偏移
-
     // 堆场位置解析正则：YARD_A_01_02_03 表示 箱区_贝位_排号_层号
     private static final Pattern YARD_POS_PATTERN = Pattern.compile("YARD_(\\w+)_(\\d+)_(\\d+)_(\\d+)");
 
@@ -174,20 +171,44 @@ public class PutDoneHandler implements SimEventHandler {
 
     /**
      * 获取设备允许的作业跨度
+     * 从外部配置获取参数
      */
     private double getAllowedOperationSpan(BaseDevice crane, BaseDevice truck) {
         DeviceTypeEnum craneType = crane.getType();
 
-        if (craneType == DeviceTypeEnum.QC) {
-            // 岸桥(QC)与集卡的跨距作业
-            return QC_TRUCK_Y_OFFSET + DEFAULT_PROXIMITY_THRESHOLD;
-        }
-        else if (craneType == DeviceTypeEnum.ASC) {
-            // 龙门吊(ASC)与集卡的跨距作业
-            return 100.0;
+        double baseThreshold;
+        double yOffset;
+
+        // 从外部配置获取基础接触阈值和跨距偏移
+        try {
+            baseThreshold = mapDataService.getParameter("proximityThreshold");
+        } catch (Exception e) {
+            throw new BusinessException("物理参数缺失: proximityThreshold 未配置");
         }
 
-        return DEFAULT_PROXIMITY_THRESHOLD;
+        try {
+            yOffset = mapDataService.getParameter("qcTruckYOffset");
+        } catch (Exception e) {
+            throw new BusinessException("物理参数缺失: qcTruckYOffset 未配置");
+        }
+
+        if (craneType == DeviceTypeEnum.QC) {
+            // 岸桥(QC)与集卡的跨距作业
+            return yOffset + baseThreshold;
+        }
+        else if (craneType == DeviceTypeEnum.ASC) {
+            // 龙门吊(ASC)与集卡的跨距作业 - 从外部配置获取
+            double ascSpan;
+            try {
+                ascSpan = mapDataService.getParameter("ascOperationSpan");
+            } catch (Exception e) {
+                throw new BusinessException("物理参数缺失: ascOperationSpan 未配置");
+            }
+            return ascSpan;
+        }
+
+        // 默认使用基础接触阈值
+        return baseThreshold;
     }
 
     /**

@@ -47,5 +47,9 @@ public class DevicePhysicsParam {
      * 安全电量冗余阈值 (百分比)
      */
     private Double safePowerThreshold;
-}
 
+    /**
+     * 最大电量 (千瓦时)
+     */
+    private Double maxPower;
+}

@@ -32,6 +32,9 @@ import model.dto.config.MapPathDto;
 @Component
 public class CmdCraneMoveHandler implements SimEventHandler {
 
+    // 浮点数比较极小值常量
+    private static final double EPSILON = 1e-4;
+
     private static final Logger log = LoggerFactory.getLogger(CmdCraneMoveHandler.class);
 
     private final MapDataService mapDataService;
@@ -73,15 +76,15 @@ public class CmdCraneMoveHandler implements SimEventHandler {
         Point targetPoint;
 
         DeviceTypeEnum deviceType = device.getType();
-        double tolerance = 3.0;
-        try {
-            if (deviceType == DeviceTypeEnum.QC) {
-                tolerance = mapDataService.getParameter("qcRailTolerance");
-            } else if (deviceType == DeviceTypeEnum.ASC) {
-                tolerance = mapDataService.getParameter("ascRailTolerance");
-            }
-        } catch (Exception e) {
-            // 使用默认值
+
+        // 从外部配置获取容差值，不允许使用默认值兜底
+        double tolerance;
+        if (deviceType == DeviceTypeEnum.QC) {
+            tolerance = mapDataService.getParameter("qcRailTolerance");
+        } else if (deviceType == DeviceTypeEnum.ASC) {
+            tolerance = mapDataService.getParameter("ascRailTolerance");
+        } else {
+            throw new BusinessException(String.format("未知的起重机类型: %s", deviceType));
         }
 
         // 计算目标坐标
@@ -95,7 +98,8 @@ public class CmdCraneMoveHandler implements SimEventHandler {
 
             if (deviceType == DeviceTypeEnum.QC) {
                 // QC 只能在 QC 轨道上水平移动，Y 坐标必须保持不变
-                if (Math.abs(distance) > 0.1) {
+                // 校验当前是否在轨道上（距离大于 EPSILON 才需要校验）
+                if (Math.abs(distance) > EPSILON) {
                     MapPathDto qcRail = mapDataService.getQcRail();
                     if (qcRail == null) {
                         throw new BusinessException("严重错误: 地图未配置 QC 轨道");
@@ -142,17 +146,26 @@ public class CmdCraneMoveHandler implements SimEventHandler {
             targetPoint = new Point(posX + distance, posY);
         }
 
-        // 物理轴向锁定校验
+        // 物理轴向锁定校验 - 从外部配置获取允许的轴向偏差
+        double axisTolerance;
+        if (deviceType == DeviceTypeEnum.QC) {
+            axisTolerance = mapDataService.getParameter("qcAxisTolerance");
+        } else if (deviceType == DeviceTypeEnum.ASC) {
+            axisTolerance = mapDataService.getParameter("ascAxisTolerance");
+        } else {
+            throw new BusinessException(String.format("未知的起重机类型: %s", deviceType));
+        }
+
         if (device instanceof QcDevice) {
             double deltaY = Math.abs(targetPoint.getY() - posY);
-            if (deltaY > 0.5) {
+            if (deltaY > axisTolerance) {
                 throw new BusinessException(String.format(
                         "物理违规: 岸桥(QC) [%s] 只能沿 X 轴水平移动！当前Y=%.1f，目标Y=%.1f，偏差=%.2f",
                         craneId, posY, targetPoint.getY(), deltaY));
             }
         } else if (device instanceof AscDevice) {
             double deltaX = Math.abs(targetPoint.getX() - posX);
-            if (deltaX > 0.5) {
+            if (deltaX > axisTolerance) {
                 throw new BusinessException(String.format(
                         "物理违规: 场桥(ASC) [%s] 只能沿 Y 轴垂直移动！当前X=%.1f，目标X=%.1f，偏差=%.2f",
                         craneId, posX, targetPoint.getX(), deltaX));
