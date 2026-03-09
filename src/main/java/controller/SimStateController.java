@@ -11,10 +11,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import service.algorithm.DevicePhysicsParamService;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -25,9 +28,11 @@ import java.util.stream.Collectors;
 public class SimStateController {
 
     private final SimulationEngine engine;
+    private final DevicePhysicsParamService devicePhysicsParamService;
 
-    public SimStateController(SimulationEngine engine) {
+    public SimStateController(SimulationEngine engine, DevicePhysicsParamService devicePhysicsParamService) {
         this.engine = engine;
+        this.devicePhysicsParamService = devicePhysicsParamService;
     }
 
     /**
@@ -86,6 +91,51 @@ public class SimStateController {
     @GetMapping("/speed")
     public Result getPlaybackSpeed() {
         return Result.success("当前播放速度", engine.getPlaybackSpeed());
+    }
+
+    /**
+     * 获取指定设备的物理参数
+     * @param deviceId 设备ID
+     */
+    @GetMapping("/device/physics")
+    public Result getDevicePhysicsParam(@RequestParam String deviceId) {
+        DevicePhysicsParam param = devicePhysicsParamService.getPhysicsParam(deviceId);
+        return Result.success("查询成功", param);
+    }
+
+    /**
+     * 同步设备物理参数（从外部接口拉取）
+     * @param deviceIds 设备ID列表（逗号分隔）
+     */
+    @PostMapping("/device/physics/sync")
+    public Result syncDevicePhysicsParams(@RequestParam String deviceIds) {
+        List<String> ids = Arrays.asList(deviceIds.split(","));
+        devicePhysicsParamService.syncPhysicsParams(ids);
+        return Result.success("同步成功");
+    }
+
+    /**
+     * 预加载所有设备的物理参数
+     */
+    @PostMapping("/device/physics/preload")
+    public Result preloadAllPhysicsParams() {
+        GlobalContext ctx = GlobalContext.getInstance();
+        List<String> allDeviceIds = new ArrayList<>();
+        allDeviceIds.addAll(ctx.getTruckMap().keySet());
+        allDeviceIds.addAll(ctx.getQcMap().keySet());
+        allDeviceIds.addAll(ctx.getAscMap().keySet());
+
+        devicePhysicsParamService.preloadAllParams(allDeviceIds);
+        return Result.success("预加载完成，共 " + allDeviceIds.size() + " 台设备");
+    }
+
+    /**
+     * 获取所有已缓存的设备物理参数
+     */
+    @GetMapping("/device/physics/all")
+    public Result getAllPhysicsParams() {
+        Map<String, DevicePhysicsParam> params = GlobalContext.getInstance().getDevicePhysicsParamMap();
+        return Result.success("查询成功", params);
     }
 
     /**

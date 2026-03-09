@@ -5,7 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 物理参数
+ * 物理参数 - 全局通用配置
+ * 注意：设备级别的物理参数（如速度）应通过 DevicePhysicsParamService 从外部接口获取
  */
 @Configuration
 @ConfigurationProperties(prefix = "sim.physics")
@@ -15,7 +16,7 @@ public class PhysicsConfig {
     /**
      * 到达目标点的判定阈值 (米)
      */
-    private double arrivalThreshold = 0.01;
+    private double arrivalThreshold = 0.5;
 
     /**
      * 充电前设备与充电桩的对准距离阈值 (米)

@@ -4,7 +4,7 @@
 
 import { defineStore } from 'pinia';
 import {
-    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getMapConfig, getMapPaths, getTransferZones, setPlaybackSpeed
+    getSnapshot, stepNextEvent, tick, resetSimulation, loadScenarioFromJson, getMapPaths, getTransferZones, setPlaybackSpeed
 } from '../api/simulation';
 
 export const useSimStore = defineStore('simulation', {
@@ -73,12 +73,23 @@ export const useSimStore = defineStore('simulation', {
             } catch (error) { throw error; }
         },
 
-        /** 加载地图配置（堆场、充电站、路径等） */
+        /** 加载地图配置（堆场、充电站、路径等）- 从快照接口获取 */
         async loadMapConfig() {
             try {
-                const res: any = await getMapConfig();
-                this.mapConfig = res.data || res;
-            } catch (error) {}
+                const res: any = await getSnapshot();
+                // 兼容 axios 的返回包装结构
+                const data = res.data?.data || res.data || res;
+                if (data) {
+                    this.mapConfig = {
+                        yardBlocks: data.yardBlocks || [],
+                        chargingStations: data.chargingStations || [],
+                        paths: data.paths || []
+                    };
+                    console.log('[Store] 地图配置已从 Snapshot 加载完成', this.mapConfig);
+                }
+            } catch (error) {
+                console.error('[Store] 加载地图配置失败', error);
+            }
         },
 
         /**

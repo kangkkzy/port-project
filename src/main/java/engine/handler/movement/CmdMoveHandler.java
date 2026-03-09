@@ -134,19 +134,26 @@ public class CmdMoveHandler implements SimEventHandler {
             remainingTargets.add(target);
         }
 
-        // 将剩余目标列表存入设备
+        // 将剩余目标列表存入设备（用于分段移动）
         device.setRemainingMoveTargets(remainingTargets);
 
-        // 设置第一段的速度和目标
+        // === 运动意图字段：记录目标坐标，由引擎 Tick 推演 ===
+        device.setTargetX(endX);
+        device.setTargetY(endY);
+        device.setMoveSpeed(speed);
+        device.setState(DeviceStateEnum.MOVING);
+
+        // 设置第一段的速度和目标（legacy 字段，保留兼容）
         device.setSpeed(speed);
         device.setCurrentTargetPos(remainingTargets.get(0));
 
-        // 调度MOVE_START事件
-        SimEvent moveStart = engine.scheduleEvent(event.getEventId(), context.getSimTime(), EventTypeEnum.MOVE_START, null);
-        moveStart.addSubject("TRUCK", truckId);
+        // === 【核心修复】废除预估到达时间！ ===
+        // 移动意图已下发，完全交由物理引擎 Tick 进行逼真推演
+        // 当物理坐标真实触碰终点时，由 DevicePhysicsService 动态触发 REPORT_IDLE 事件
 
-        log.info("[CMD_MOVE] 设备 [{}] 移动轨迹: {} -> {}", truckId,
-                String.format("(%.1f,%.1f)", startX, startY),
-                String.format("(%.1f,%.1f)", endX, endY));
+        log.info("[CMD_MOVE] 设备 [{}] 收到移动意图: ({}, {}) -> ({}, {}), 交由底层 Tick 引擎进行逼真寻路推演...",
+                truckId,
+                String.format("%.1f", startX), String.format("%.1f", startY),
+                String.format("%.1f", endX), String.format("%.1f", endY));
     }
 }

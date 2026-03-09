@@ -4,7 +4,10 @@ import common.config.PhysicsConfig;
 import lombok.Getter;
 import lombok.Setter;
 import model.entity.*;
+import model.entity.DevicePhysicsParam;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -50,6 +53,9 @@ public class GlobalContext {
     @Setter
     private PhysicsConfig physicsConfig;
 
+    // 设备物理参数 (从外部接口获取，按设备ID存储)
+    private final Map<String, DevicePhysicsParam> devicePhysicsParamMap = new ConcurrentHashMap<>();
+
     // 防止外部直接 new 对象
     private GlobalContext() {}
 
@@ -79,6 +85,15 @@ public class GlobalContext {
         return ascMap.get(deviceId);
     }
 
+    /** 获取所有设备的集合（用于物理推演） */
+    public Collection<BaseDevice> getAllDevices() {
+        Map<String, BaseDevice> all = new HashMap<>();
+        all.putAll(truckMap);
+        all.putAll(qcMap);
+        all.putAll(ascMap);
+        return all.values();
+    }
+
     /**
      * 场景重置 - 彻底清空所有数据
      */
@@ -93,5 +108,6 @@ public class GlobalContext {
         chargingStationMap.clear();
         workInstructionMap.clear();
         containerMap.clear();
+        devicePhysicsParamMap.clear();
     }
 }

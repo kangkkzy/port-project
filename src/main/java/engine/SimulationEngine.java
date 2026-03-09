@@ -7,6 +7,7 @@ import engine.context.GlobalContext;
 import engine.log.SimulationEventLog;
 import engine.log.SimulationErrorLog;
 import engine.websocket.SimulationEventWebSocketService;
+import service.algorithm.DevicePhysicsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import model.dto.snapshot.EventLogEntryDto;
@@ -50,7 +51,16 @@ public class SimulationEngine implements InitializingBean {
     @Autowired(required = false)
     private SimulationEventWebSocketService webSocketService;   // 可选，没有也能运行
 
+    @Autowired
+    private DevicePhysicsService devicePhysicsService;  // 物理推演服务
+
     private final GlobalContext context = GlobalContext.getInstance();
+
+    /** 状态快照广播间隔（毫秒） */
+    private static final long STATE_BROADCAST_INTERVAL_MS = 50;
+
+    /** 上次状态广播的真实时间戳 */
+    private long lastStateBroadcastTime = 0;
 
     // -------------------- 数据结构 --------------------
 
@@ -394,6 +404,7 @@ public class SimulationEngine implements InitializingBean {
     private void runLoop() {
         log.info("引擎后台循环已启动 (threadId={}, timeScale={}x)", Thread.currentThread().getId(), timeScale);
         long lastRealTime = System.currentTimeMillis();
+        lastStateBroadcastTime = lastRealTime;
 
         while (engineState == EngineState.RUNNING) {
             try {
@@ -405,6 +416,7 @@ public class SimulationEngine implements InitializingBean {
                         engineLock.wait(1000);
                     }
                     lastRealTime = System.currentTimeMillis(); // 休眠期间真实时间已流逝，重置基准
+                    lastStateBroadcastTime = lastRealTime;
                     continue;
                 }
 
@@ -414,6 +426,20 @@ public class SimulationEngine implements InitializingBean {
                 lastRealTime = nowRealTime;
                 long newSimTime = context.getSimTime() + (long)(realDelta * timeScale);
                 context.setSimTime(newSimTime);
+
+                // ── 物理推演 + 定时状态广播 ──
+                if (nowRealTime - lastStateBroadcastTime >= STATE_BROADCAST_INTERVAL_MS) {
+                    double deltaSec = (realDelta * timeScale) / 1000.0;
+                    // 推演物理坐标（将 this 传入以支持动态触发事件）
+                    if (devicePhysicsService != null) {
+                        devicePhysicsService.updateMovingDevices(context, this, deltaSec);
+                    }
+                    // 广播状态快照（包含实时坐标）
+                    if (webSocketService != null) {
+                        webSocketService.broadcastState(context);
+                    }
+                    lastStateBroadcastTime = nowRealTime;
+                }
 
                 // ── 仿真时钟到达事件触发时间，立即执行 ──
                 if (newSimTime >= nextEvent.getTriggerTime()) {

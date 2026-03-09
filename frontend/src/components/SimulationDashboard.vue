@@ -271,7 +271,7 @@
           <ul class="log-list" ref="logContainer">
             <li v-for="log in filteredEvents" :key="log.eventId">
               <span class="log-time">[{{ formatSimTime(log.simTime) }}]</span>
-              <span class="log-type">{{ log.type }}</span>
+              <span class="log-type">{{ log.eventType || log.type }}</span>
               <span class="log-subject">{{ formatSubjects(log.subjects) }}</span>
             </li>
           </ul>
@@ -489,13 +489,14 @@ const filteredEvents = computed(() => {
   // Crane 操作类型事件
   const craneTypes = ['CMD_CRANE_OP', 'FETCH_DONE', 'PUT_DONE', 'CRANE_MOVE'];
 
-  return events.filter(e => {
-    const type = e.type?.name || e.type || '';
+  return events.filter((e: any) => {
+    // 核心修复：优先取后端的 eventType 字段
+    const typeStr = e.eventType || e.type?.name || e.type || '';
     if (logFilter.value === 'movement') {
-      return movementTypes.some(t => type.includes(t));
+      return movementTypes.some(t => typeStr.includes(t));
     }
     if (logFilter.value === 'crane') {
-      return craneTypes.some(t => type.includes(t));
+      return craneTypes.some(t => typeStr.includes(t));
     }
     return true;
   });

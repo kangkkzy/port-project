@@ -9,7 +9,7 @@ import axios from 'axios';
 
 // 创建 axios 实例，配置基础 URL 和超时时间
 const service = axios.create({
-    baseURL: 'http://localhost:8080/sim', // 对应后端的 @RequestMapping("/sim/...")
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080', // 移除写死的 /sim，防止双重前缀
     timeout: 10000 // 请求超时时间：10秒
 });
 

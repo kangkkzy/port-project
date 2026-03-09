@@ -22,8 +22,8 @@ public class CmdCraneOpHandler implements SimEventHandler {
 
     private static final Logger log = LoggerFactory.getLogger(CmdCraneOpHandler.class);
 
-    /** 起重机与集卡协同作业允许的最大空间距离（米）。交接区放大后最大跨度约 70 米 */
-    private static final double MAX_CRANE_TRUCK_DISTANCE = 80.0;
+    /** 起重机与集卡协同作业允许的最大空间距离（米）。适当放宽到 100 米以容纳极值情况 */
+    private static final double MAX_TRANSFER_DISTANCE = 100.0;
 
     @Override
     public EventTypeEnum getType() {
@@ -67,20 +67,26 @@ public class CmdCraneOpHandler implements SimEventHandler {
             // ── 强制安全锁：集卡必须处于 IDLE 静止状态 ──
             if (truck.getState() != DeviceStateEnum.IDLE) {
                 throw new BusinessException(String.format(
-                        "安全违规：目标集卡 [%s] 状态为 %s。必须等待集卡完全停稳到达目标点后，起重机才能执行抓放作业！",
+                        "安全违规：目标集卡 [%s] 状态为 %s，未停稳前严禁抓放箱！",
                         targetTruckId, truck.getState()));
             }
 
-            double distance = Math.hypot(
-                    crane.getPosX() - truck.getPosX(),
-                    crane.getPosY() - truck.getPosY());
-            if (distance > MAX_CRANE_TRUCK_DISTANCE) {
-                log.error("协同物理违规: 起重机 [{}] 与集卡 [{}] 距离 {:.1f}m 超出交接区范围 {}m",
-                        craneId, targetTruckId, distance, MAX_CRANE_TRUCK_DISTANCE);
+            // 改用曼哈顿距离判断（更符合正交移动特征）
+            double distance = Math.abs(crane.getPosX() - truck.getPosX()) + Math.abs(crane.getPosY() - truck.getPosY());
+
+            if (distance > MAX_TRANSFER_DISTANCE) {
+                log.error("协同物理违规: 起重机 [{}] 与集卡 [{}] 距离 {:.1f}m 超出交接区范围 {}m. 坐标: 吊机({:.1f}, {:.1f}), 卡车({:.1f}, {:.1f})",
+                        craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                        crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY());
                 throw new BusinessException(String.format(
-                        "协同物理违规：起重机 [%s] 与集卡 [%s] 距离 %.1f 米，超出交接区最大范围 %.0f 米，必须同处交接区才能作业！",
-                        craneId, targetTruckId, distance, MAX_CRANE_TRUCK_DISTANCE));
+                        "物理违规：起重机 [%s] 与 集卡 [%s] 距离为 %.1f 米，超出交接作业极值 %.1f 米！当前坐标: 吊机(%.1f, %.1f), 卡车(%.1f, %.1f)",
+                        craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                        crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY()));
             }
+
+            log.info("[CMD_CRANE_OP] 起重机 [{}] 与集卡 [{}] 距离 {:.1f}m（允许范围 {:.1f}m），作业合法。坐标: 吊机({:.1f}, {:.1f}), 卡车({:.1f}, {:.1f})",
+                    craneId, targetTruckId, distance, MAX_TRANSFER_DISTANCE,
+                    crane.getPosX(), crane.getPosY(), truck.getPosX(), truck.getPosY());
         }
 
         crane.setState(DeviceStateEnum.WORKING);
@@ -90,3 +96,4 @@ public class CmdCraneOpHandler implements SimEventHandler {
         opEvent.addSubject("CRANE", craneId);
     }
 }
+
