@@ -8,8 +8,11 @@ import model.entity.DevicePhysicsParam;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 /**
  * 仿真世界的全局上下文
@@ -57,10 +60,41 @@ public class GlobalContext {
     private final Map<String, DevicePhysicsParam> devicePhysicsParamMap = new ConcurrentHashMap<>();
 
     /**
+     * 未来轨迹注册表 - 用于碰撞检测
+     * 存储所有设备即将执行的轨迹片段
+     */
+    private final List<TrajectorySegment> futureTrajectories = new CopyOnWriteArrayList<>();
+
+    /**
      * 获取设备物理参数Map
      */
     public Map<String, DevicePhysicsParam> getDevicePhysicsParamMap() {
         return devicePhysicsParamMap;
+    }
+
+    /**
+     * 获取未来轨迹注册表
+     */
+    public List<TrajectorySegment> getFutureTrajectories() {
+        return futureTrajectories;
+    }
+
+    /**
+     * 添加轨迹片段到注册表
+     */
+    public void addTrajectorySegment(TrajectorySegment segment) {
+        futureTrajectories.add(segment);
+    }
+
+    /**
+     * 清理已过期的轨迹（endTime < currentSimTime）
+     * @param currentSimTime 当前仿真时间
+     */
+    public void cleanupExpiredTrajectories(long currentSimTime) {
+        List<TrajectorySegment> expired = futureTrajectories.stream()
+                .filter(seg -> seg.getEndTime() < currentSimTime)
+                .collect(Collectors.toList());
+        futureTrajectories.removeAll(expired);
     }
 
     // 防止外部直接 new 对象
@@ -116,5 +150,6 @@ public class GlobalContext {
         workInstructionMap.clear();
         containerMap.clear();
         devicePhysicsParamMap.clear();
+        futureTrajectories.clear();
     }
 }

@@ -32,7 +32,7 @@ export const useSimStore = defineStore('simulation', {
         selectedDevice: null as any,     // 当前选中的设备
         selectedDeviceId: null as string | null,  // 当前选中的设备ID
         selectedTargetPos: null as { x: number, y: number } | null,  // 当前选中的目标位置
-        pendingMoveCommand: null as { fromX: number, fromY: number, toX: number, toY: number } | null,  // 待执行的移动指令（用于显示连线）
+        pendingMoveCommand: null as { fromX: number, fromY: number, toX: number, toY: number, pathPoints?: any[] } | null,  // 待执行的移动指令（用于显示连线）
 
         // ---------- 地图数据 ----------
         mapConfig: null as any,            // 地图配置（堆场、充电站、路径等）

@@ -12,6 +12,7 @@ import model.entity.ChargingStation;
 import model.entity.Point;
 import model.entity.Truck;
 import org.springframework.stereotype.Component;
+import service.algorithm.MapDataService;
 
 import java.util.Map;
 
@@ -20,6 +21,12 @@ import java.util.Map;
  */
 @Component
 public class CmdChargeHandler implements SimEventHandler {
+
+    private final MapDataService mapDataService;
+
+    public CmdChargeHandler(MapDataService mapDataService) {
+        this.mapDataService = mapDataService;
+    }
 
     @Override
     public EventTypeEnum getType() {
@@ -38,10 +45,11 @@ public class CmdChargeHandler implements SimEventHandler {
         ChargingStation station = context.getChargingStationMap().get(stationId);
         if (station == null) throw new BusinessException("充电桩不存在");
 
-        // 校验位置对准
+        // 校验位置对准（无配置即报错）
+        double alignThreshold = mapDataService.getParameter("chargeAlignThreshold");
         Point truckPos = new Point(truck.getPosX(), truck.getPosY());
         Point stationPos = new Point(station.getPosX(), station.getPosY());
-        if (GisUtil.getDistance(truckPos, stationPos) > context.getPhysicsConfig().getChargeAlignThreshold()) {
+        if (GisUtil.getDistance(truckPos, stationPos) > alignThreshold) {
             throw new BusinessException("充电失败: 设备未对准充电桩");
         }
 

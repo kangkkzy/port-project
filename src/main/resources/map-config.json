@@ -8,14 +8,18 @@
     "GATE_OUT": 600.0
   },
   "parameters": {
+    "collisionSafeDistance": 5.0,
+    "qcOperationSpan": 60.0,
+    "ascOperationSpan": 200.0,
+    "chargeAlignThreshold": 1.0,
+    "truckRoadTolerance": 5.0,
+    "qcRailTolerance": 3.0,
+    "ascRailTolerance": 3.0,
+    "transferZoneTolerance": 5.0,
     "minQcDistance": 30.0,
     "truckSpeed": 10.0,
     "qcSpeed": 5.0,
-    "ascSpeed": 5.0,
-    "truckRoadTolerance": 8.0,
-    "qcRailTolerance": 5.0,
-    "ascRailTolerance": 5.0,
-    "transferZoneTolerance": 10.0
+    "ascSpeed": 5.0
   },
   "yardBlocks": [
     { "blockCode": "YARD_A", "posX": 200.0, "posY": 250.0, "width": 40.0, "length": 200.0 },

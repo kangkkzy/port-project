@@ -914,11 +914,12 @@ const handleMoveToTarget = async () => {
 
       ElMessage.success(`指令发送成功: [${deviceId}] ${moveType} ${distance >= 0 ? '+' : ''}${distance}m`);
     } else {
-      // MoveCommandReq: truckId + targetPoint + speed（speed 必填，否则后端 CmdMoveHandler 抛异常）
+      // MoveCommandReq: truckId + targetPoint + speed + pathPoints（精确模式）
       const payload = {
         truckId: deviceId,
         targetPoint: { x: Number(targetPos.x), y: Number(targetPos.y) },
-        speed: commandSpeed.value
+        speed: commandSpeed.value,
+        pathPoints: simStore.pendingMoveCommand?.pathPoints || null
       };
       console.log('🚀 发送集卡指令 Payload:', payload);
       await moveTruck(payload);

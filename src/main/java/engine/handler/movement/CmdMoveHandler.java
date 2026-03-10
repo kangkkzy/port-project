@@ -10,10 +10,12 @@ import engine.context.GlobalContext;
 import model.dto.request.MoveCommandReq;
 import model.entity.BaseDevice;
 import model.entity.Point;
+import model.entity.TrajectorySegment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import service.algorithm.CollisionRadarService;
 import service.algorithm.MapDataService;
 import service.algorithm.TrajectoryValidationResult;
 
@@ -37,10 +39,12 @@ public class CmdMoveHandler implements SimEventHandler {
     private static final Logger log = LoggerFactory.getLogger(CmdMoveHandler.class);
 
     private final MapDataService mapDataService;
+    private final CollisionRadarService collisionRadarService;
 
     @Autowired
-    public CmdMoveHandler(MapDataService mapDataService) {
+    public CmdMoveHandler(MapDataService mapDataService, CollisionRadarService collisionRadarService) {
         this.mapDataService = mapDataService;
+        this.collisionRadarService = collisionRadarService;
     }
 
     @Override
@@ -89,14 +93,15 @@ public class CmdMoveHandler implements SimEventHandler {
 
         List<Point> remainingTargets = new ArrayList<>();
 
-        // 外部算法必须提供完整的行驶轨迹点列表
+        // === 严格模式：外部算法必须提供完整的行驶轨迹点列表 ===
+        // 引擎不再自动计算关键点（删除 getKeyPointsBetween 调用）
         if (payload.getPathPoints() == null || payload.getPathPoints().isEmpty()) {
             throw new BusinessException("外部算法必须提供完整的行驶轨迹点 (pathPoints)，引擎不再自动计算路径");
         }
 
         List<Point> externalPath = payload.getPathPoints();
 
-        // 校验路径合法性
+        // 校验路径合法性（如果启用）
         if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {
             String deviceType = device.getType().name();
             TrajectoryValidationResult validation = mapDataService.validateTrajectory(deviceType, externalPath);
@@ -121,7 +126,7 @@ public class CmdMoveHandler implements SimEventHandler {
         // 将剩余目标列表存入设备（用于分段移动）
         device.setRemainingMoveTargets(remainingTargets);
 
-        // 记录目标坐标
+        // === 运动意图字段：记录目标坐标 ===
         device.setTargetX(endX);
         device.setTargetY(endY);
         device.setMoveSpeed(speed);
@@ -129,12 +134,13 @@ public class CmdMoveHandler implements SimEventHandler {
 
         // 设置第一段的速度和目标
         device.setSpeed(speed);
+        // 使用 targetX/targetY 字段代替 setCurrentTargetPos
         if (remainingTargets.get(0) != null) {
             device.setTargetX(remainingTargets.get(0).getX());
             device.setTargetY(remainingTargets.get(0).getY());
         }
 
-        // 计算耗时并立即调度 ARRIVAL 事件 ===
+        // === 纯离散事件调度：计算耗时并立即调度 ARRIVAL 事件 ===
         // 取出第一个目标点（从索引1开始，因为索引0是当前位置）
         Point firstTarget = remainingTargets.get(1);
 
@@ -144,7 +150,7 @@ public class CmdMoveHandler implements SimEventHandler {
                         Math.pow(firstTarget.getY() - startY, 2)
         );
 
-        // 计算耗时（毫秒） 处理 speed 为 0 的除零风险
+        // 计算耗时（毫秒），处理 speed 为 0 的除零风险
         long duration;
         if (speed <= 0 || distance <= 0) {
             duration = 0;
@@ -156,7 +162,25 @@ public class CmdMoveHandler implements SimEventHandler {
         long currentSimTime = context.getSimTime();
         long arrivalTime = currentSimTime + duration;
 
-        // 设置虚拟状态插值字段 用于前端平滑动画
+        // === 时空防碰雷达校验 ===
+        // 将即将发生的移动转换为轨迹片段
+        List<TrajectorySegment> trajectorySegments = buildTrajectorySegments(
+                device.getId(), startX, startY, firstTarget.getX(), firstTarget.getY(),
+                currentSimTime, arrivalTime, speed
+        );
+
+        // 从外部参数获取安全距离（无配置即报错）
+        double safeDistance = mapDataService.getParameter("collisionSafeDistance");
+
+        // 调用防碰雷达校验（如果抛出异常则中断执行）
+        collisionRadarService.validateAndRegister(
+                device.getId(),
+                trajectorySegments,
+                context,
+                safeDistance
+        );
+
+        // 设置虚拟状态插值字段，用于前端平滑动画
         device.setMoveStartTime(currentSimTime);
         device.setMoveStartPosX(startX);
         device.setMoveStartPosY(startY);
@@ -177,5 +201,37 @@ public class CmdMoveHandler implements SimEventHandler {
                 String.format("%.1f", startX), String.format("%.1f", startY),
                 String.format("%.1f", firstTarget.getX()), String.format("%.1f", firstTarget.getY()),
                 String.format("%.1f", distance), speed, duration, arrivalTime);
+    }
+
+    /**
+     * 构建轨迹片段列表
+     * 将一系列移动点转换为带有确切时间戳的轨迹片段
+     */
+    private List<TrajectorySegment> buildTrajectorySegments(String deviceId,
+                                                            double startX, double startY,
+                                                            double endX, double endY,
+                                                            long startTime, long endTime,
+                                                            double speed) {
+        List<TrajectorySegment> segments = new ArrayList<>();
+
+        // 速度转换为米/毫秒
+        double speedPerMs = speed / 1000.0;
+
+        // 计算单段距离和时间
+        double distance = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+        long segmentDuration = (long) (distance / speedPerMs);
+
+        TrajectorySegment segment = new TrajectorySegment();
+        segment.setDeviceId(deviceId);
+        segment.setStartX(startX);
+        segment.setStartY(startY);
+        segment.setEndX(endX);
+        segment.setEndY(endY);
+        segment.setStartTime(startTime);
+        segment.setEndTime(startTime + segmentDuration);
+
+        segments.add(segment);
+
+        return segments;
     }
 }

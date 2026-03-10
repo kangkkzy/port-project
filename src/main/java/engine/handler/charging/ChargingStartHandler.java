@@ -39,7 +39,7 @@ public class ChargingStartHandler implements SimEventHandler {
                 throw new BusinessException("充电桩 [" + stationId + "] 未配置合法充电速率");
             }
 
-            // 从外部物理参数获取集卡最大电量，不允许使用 Truck.MAX_POWER_LEVEL 兜底
+            // 从外部物理参数获取集卡最大电量
             DevicePhysicsParam physicsParam = context.getDevicePhysicsParamMap().get(truckId);
             if (physicsParam == null) {
                 throw new BusinessException(String.format("设备 [%s] 物理参数缺失，请确保在场景初始化时由外部算法下发了该数据", truckId));

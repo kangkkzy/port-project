@@ -45,11 +45,15 @@ public class ArrivalHandler implements SimEventHandler {
             return;
         }
 
-        //  更新真实坐标
+        // ==================== 任务0：清理过期轨迹（防止内存泄漏） ====================
+        long currentSimTime = context.getSimTime();
+        context.cleanupExpiredTrajectories(currentSimTime);
+
+        // ==================== 任务1：更新真实坐标 ====================
         Point arrivedPoint = (Point) event.getData();
         if (arrivedPoint == null) {
             log.warn("ARRIVAL 事件数据为空，设备 {} 无法更新坐标", deviceId);
-            // 仍然继续处理 可能没有更多目标点了
+            // 仍然继续处理，可能没有更多目标点了
         } else {
             // 直接更新真实坐标
             device.setPosX(arrivedPoint.getX());
@@ -59,11 +63,11 @@ public class ArrivalHandler implements SimEventHandler {
                     String.format("%.1f", arrivedPoint.getY()));
         }
 
-        //  ：分段路径接力调度
+        // ==================== 任务2：分段路径接力调度 ====================
         List<Point> remainingTargets = device.getRemainingMoveTargets();
 
         if (remainingTargets != null && !remainingTargets.isEmpty()) {
-            // 还有剩余目标点 调度下一段移动
+            // 还有剩余目标点，调度下一段移动
             Point nextTarget = remainingTargets.remove(0);
 
             // 计算当前位置到下一个目标的距离
@@ -74,7 +78,7 @@ public class ArrivalHandler implements SimEventHandler {
                             Math.pow(nextTarget.getY() - currentY, 2)
             );
 
-            // 获取设备速度（ 校验：速度必须大于0）
+            // 获取设备速度（严格校验：速度必须大于0）
             Double speed = device.getSpeed();
             if (speed == null || speed <= 0) {
                 speed = device.getMoveSpeed();
@@ -83,7 +87,7 @@ public class ArrivalHandler implements SimEventHandler {
                 throw new BusinessException(String.format("物理推演错误: 设备 [%s] 未配置移动速度", deviceId));
             }
 
-            // 计算当前段耗时（ 校验：距离>0时速度必须>0）
+            // 计算当前段耗时（严格校验：距离>0时速度必须>0）
             if (distance > 0 && speed <= 0) {
                 throw new BusinessException(String.format("物理推演错误: 剩余距离大于0但移动速度为0，设备 [%s] 禁止瞬移", deviceId));
             }
@@ -96,10 +100,10 @@ public class ArrivalHandler implements SimEventHandler {
             }
 
             // 计算下一段到达时间
-            long currentSimTime = context.getSimTime();
+            // 复用已经在任务0中定义的 currentSimTime 变量
             long nextArrivalTime = currentSimTime + duration;
 
-            // 更新设备的虚拟插值字段（用于前端平滑动画）
+            // 更新设备的虚拟插值字段（极其重要，用于前端平滑动画）
             device.setMoveStartTime(currentSimTime);
             device.setMoveStartPosX(currentX);
             device.setMoveStartPosY(currentY);
@@ -107,12 +111,12 @@ public class ArrivalHandler implements SimEventHandler {
             device.setTargetY(nextTarget.getY());
             device.setExpectedArrivalTime(nextArrivalTime);
 
-            // 如果所有目标点都到达了 清空列表
+            // 如果所有目标点都到达了，清空列表
             if (remainingTargets.isEmpty()) {
                 device.setRemainingMoveTargets(null);
             }
 
-            // 直接调度下一个 ARRIVAL 事件
+            // 直接调度下一个 ARRIVAL 事件（不再调度无意义的 MOVE_START）
             SimEvent nextArrivalEvent = engine.scheduleEvent(
                     event.getEventId(),
                     nextArrivalTime,
@@ -138,8 +142,8 @@ public class ArrivalHandler implements SimEventHandler {
             return;
         }
 
-        //  终点处理  IDLE 报告
-        // 没有剩余目标点 说明已经走完所有轨迹点
+        // ==================== 任务3：终点处理与 IDLE 报告 ====================
+        // 没有剩余目标点，说明已经走完所有轨迹点
 
         // 清空相关状态
         device.setRemainingMoveTargets(null);
