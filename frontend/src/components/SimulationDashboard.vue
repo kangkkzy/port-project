@@ -554,7 +554,7 @@ const animateLoop = (timestamp?: number) => {
       if (target.state === 'MOVING' &&
           target.moveStartTime != null &&
           target.expectedArrivalTime != null &&
-          target.moveStartTime < target.expectedArrivalTime) {
+          target.expectedArrivalTime > target.moveStartTime) {
 
         const moveStartTime = target.moveStartTime;
         const expectedArrivalTime = target.expectedArrivalTime;
@@ -572,6 +572,11 @@ const animateLoop = (timestamp?: number) => {
 
         curr.posX = moveStartPosX + (targetX - moveStartPosX) * progress;
         curr.posY = moveStartPosY + (targetY - moveStartPosY) * progress;
+      } else if (target.state === 'MOVING' &&
+          target.expectedArrivalTime === target.moveStartTime) {
+        // 耗时为0：直接瞬移到目标位置（防除零）
+        curr.posX = target.targetX ?? target.posX;
+        curr.posY = target.targetY ?? target.posY;
       } else {
         // 非 MOVING 状态或无插值字段，直接使用后端坐标
         curr.posX = target.posX;
