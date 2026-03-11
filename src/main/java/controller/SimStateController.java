@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * 仿真状态查询接口
  */
 @RestController
-@RequestMapping("/sim/state")
+@RequestMapping("/api/state")
 public class SimStateController {
 
     private final SimulationEngine engine;

@@ -95,11 +95,17 @@ public class CmdMoveHandler implements SimEventHandler {
 
         // === 严格模式：外部算法必须提供完整的行驶轨迹点列表 ===
         // 引擎不再自动计算关键点（删除 getKeyPointsBetween 调用）
-        if (payload.getPathPoints() == null || payload.getPathPoints().isEmpty()) {
-            throw new BusinessException("外部算法必须提供完整的行驶轨迹点 (pathPoints)，引擎不再自动计算路径");
+        // 支持 waypoints 或 pathPoints 任一方式传入轨迹
+        List<Point> externalPath = null;
+        if (payload.getWaypoints() != null && !payload.getWaypoints().isEmpty()) {
+            externalPath = payload.getWaypoints();
+        } else if (payload.getPathPoints() != null && !payload.getPathPoints().isEmpty()) {
+            externalPath = payload.getPathPoints();
         }
 
-        List<Point> externalPath = payload.getPathPoints();
+        if (externalPath == null || externalPath.isEmpty()) {
+            throw new BusinessException("外部算法必须提供完整的行驶轨迹点 (waypoints 或 pathPoints)，引擎不再自动计算路径");
+        }
 
         // 校验路径合法性（如果启用）
         if (Boolean.TRUE.equals(payload.getEnforcePathValidation())) {

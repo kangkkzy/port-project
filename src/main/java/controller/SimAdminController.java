@@ -17,7 +17,7 @@ import java.util.List;
  * 仿真场景管理接口：重置与读取
  */
 @RestController
-@RequestMapping("/sim/engine")
+@RequestMapping("/api/admin/engine")
 public class SimAdminController {
 
     private final SimulationEngine engine;

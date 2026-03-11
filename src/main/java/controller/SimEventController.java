@@ -14,7 +14,7 @@ import java.util.List;
  * 仿真事件日志查询接口
  */
 @RestController
-@RequestMapping("/sim/events")
+@RequestMapping("/api/events")
 public class SimEventController {
 
     private final SimulationEventLog eventLog;

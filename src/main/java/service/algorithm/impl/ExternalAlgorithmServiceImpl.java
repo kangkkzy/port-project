@@ -81,6 +81,16 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         payload.setSpeed(req.getSpeed());
         payload.setEnforcePathValidation(true);
 
+        // 支持 waypoints 连续轨迹点
+        if (req.getWaypoints() != null && !req.getWaypoints().isEmpty()) {
+            payload.setWaypoints(req.getWaypoints());
+        }
+
+        // 兼容原有的 pathPoints
+        if (req.getPathPoints() != null && !req.getPathPoints().isEmpty()) {
+            payload.setPathPoints(req.getPathPoints());
+        }
+
         SimEvent event = engine.scheduleEvent(null, context.getSimTime(), EventTypeEnum.CMD_MOVE, payload);
         event.addSubject("TRUCK", device.getId());
         return Result.success();
@@ -198,6 +208,61 @@ public class ExternalAlgorithmServiceImpl implements ExternalAlgorithmApi {
         } else {
             return Result.error("事件不存在或已被处理");
         }
+    }
+
+    /**
+     * 设备故障注入：在仿真运行期间动态注入设备故障和恢复事件
+     *
+     * 调度两个事件：
+     * 1. CMD_DEVICE_BREAKDOWN - 立即触发，将设备状态设置为故障/抛锚
+     * 2. CMD_DEVICE_RECOVER - 延迟 durationMs 后触发，恢复设备状态
+     */
+    @Override
+    public Result injectDeviceFault(String deviceId, long durationMs) {
+        if (deviceId == null || deviceId.trim().isEmpty()) {
+            throw new BusinessException("设备ID不能为空");
+        }
+        if (durationMs <= 0) {
+            throw new BusinessException("故障持续时长 durationMs 必须大于0");
+        }
+
+        // 校验设备是否存在
+        BaseDevice device = context.getDevice(deviceId);
+        if (device == null) {
+            throw new BusinessException(ErrorCodes.DEVICE_NOT_FOUND);
+        }
+
+        long currentSimTime = context.getSimTime();
+        long recoverTime = currentSimTime + durationMs;
+
+        // 调度故障事件（立即触发）
+        Map<String, Object> breakdownPayload = new HashMap<>();
+        breakdownPayload.put("deviceId", deviceId);
+        breakdownPayload.put("reason", "外部注入故障");
+
+        SimEvent breakdownEvent = engine.scheduleEvent(
+                null,
+                currentSimTime,
+                EventTypeEnum.CMD_DEVICE_BREAKDOWN,
+                breakdownPayload
+        );
+        breakdownEvent.addSubject("DEVICE", deviceId);
+
+        // 调度恢复事件（延迟触发）
+        Map<String, Object> recoverPayload = new HashMap<>();
+        recoverPayload.put("deviceId", deviceId);
+        recoverPayload.put("breakdownEventId", breakdownEvent.getEventId());
+
+        SimEvent recoverEvent = engine.scheduleEvent(
+                null,
+                recoverTime,
+                EventTypeEnum.CMD_DEVICE_RECOVER,
+                recoverPayload
+        );
+        recoverEvent.addSubject("DEVICE", deviceId);
+
+        return Result.success(String.format("设备 [%s] 故障已注入，预计在 %d ms 后恢复 (%s -> %s)",
+                deviceId, durationMs, currentSimTime, recoverTime));
     }
 
     /**

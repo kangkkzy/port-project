@@ -32,6 +32,13 @@ public class MoveCommandReq {
     private List<Point> pathPoints;
 
     /**
+     * 连续轨迹点列表（waypoints 模式）
+     * 与 pathPoints 功能相同，用于接收外部 MAPF 算法下发的连续轨迹点
+     * 引擎会取出第一个点作为本次移动目标，其余点在到达后自动接力执行
+     */
+    private List<Point> waypoints;
+
+    /**
      * 是否强制校验路径合法性
      * true: 如果路径脱离路网，引擎抛出异常并中断指令
      * false: 宽松模式，允许脱网移动（仅记录警告）

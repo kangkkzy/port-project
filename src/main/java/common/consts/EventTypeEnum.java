@@ -14,6 +14,10 @@ public enum EventTypeEnum {
     CMD_FENCE_TOGGLE, // 栅栏控制
     CMD_CHARGE,       // 充电指令 (仅限电集卡
 
+    //  设备故障与恢复事件
+    CMD_DEVICE_BREAKDOWN,  // 设备抛锚故障
+    CMD_DEVICE_RECOVER,    // 设备故障恢复
+
     //  任务指派交互
     CMD_ASSIGN_TASK,  //  系统下发任务
     CMD_TASK_ACK,     //  设备确认接收

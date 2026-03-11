@@ -38,4 +38,13 @@ public interface ExternalAlgorithmApi {
      * @return 本次处理的事件信息，若无待处理事件则返回 null
      */
     model.dto.snapshot.EventLogEntryDto stepNextEvent();
+
+    /**
+     * 设备故障注入：在仿真运行期间动态注入设备故障和恢复事件
+     *
+     * @param deviceId  设备ID
+     * @param durationMs 故障持续时长（毫秒），必须大于0
+     * @return 操作结果
+     */
+    Result injectDeviceFault(String deviceId, long durationMs);
 }

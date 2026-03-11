@@ -10,7 +10,7 @@ import service.scenario.ScenarioLoaderService;
  * 支持从本地文件加载或从外部系统接收 JSON payload 加载。
  */
 @RestController
-@RequestMapping("/sim/scenario")
+@RequestMapping("/api/scenario")
 @RequiredArgsConstructor
 public class ScenarioController {
 

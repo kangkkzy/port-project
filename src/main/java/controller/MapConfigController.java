@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
  * 地图配置查询接口
  */
 @RestController
-@RequestMapping("/sim/map")
+@RequestMapping("/api/map")
 public class MapConfigController {
 
     private final MapDataService mapDataService;

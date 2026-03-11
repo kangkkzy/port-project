@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  * 仿真系统命令控制器
  */
 @RestController
-@RequestMapping("/sim/command")
+@RequestMapping("/api/command")
 public class SimCommandController {
 
     private final ExternalAlgorithmApi algorithmApi;

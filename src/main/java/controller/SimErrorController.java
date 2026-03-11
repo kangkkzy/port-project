@@ -18,7 +18,7 @@ import java.util.Set;
  * 供外部算法查询异常和死循环信息
  */
 @RestController
-@RequestMapping("/sim/errors")
+@RequestMapping("/api/errors")
 public class SimErrorController {
 
     private final SimulationErrorLog errorLog;
