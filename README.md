@@ -44,7 +44,8 @@ port-project/
 │   ├── src/stores/             # 仿真状态全局管理
 │   └── src/views/              # 页面级视图
 └── pom.xml                     # Maven 依赖管理
-🚀 快速启动
+
+## 🚀 快速启动
 1. 环境准备
 JDK 17 或更高版本
 
@@ -69,7 +70,7 @@ npm install
 npm run dev
 前端服务默认运行在 http://localhost:5173。打开浏览器访问该地址即可看到港口仿真界面。
 
-🔌 API 与算法接入
+## 🔌 API 与算法接入
 本项目提供完善的 HTTP 接口用于控制引擎和下发指令，非常适合作为外部调度算法（如 Python 编写的强化学习模型）的运行环境。
 
 加载地图: GET /api/map/config
@@ -82,7 +83,7 @@ npm run dev
 
 详细的接口报文结构请参考项目内置的 Swagger 文档或 API 说明文档。
 
-📈 未来规划
+## 📈 未来规划
 [ ] 集成高级 MAPF (Multi-Agent Path Finding) 算法作为默认的寻路策略。
 
 [ ] 引入随机干扰机制（如设备临时故障），用于支持 Bow-tie 等交通风险评估模型。
